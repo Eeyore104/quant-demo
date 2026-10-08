@@ -1,26 +1,27 @@
 """资金与持仓管理（净值模型：正=净多，负=净空；MVP 不计保证金占用）。"""
+
 from dataclasses import dataclass
 
 
 @dataclass
 class Position:
     symbol: str = ""
-    size: int = 0             # 手数：正=多，负=空
-    avg_price: float = 0.0    # 持仓均价
+    size: int = 0  # 手数：正=多，负=空
+    avg_price: float = 0.0  # 持仓均价
     unrealized_pnl: float = 0.0
 
 
 @dataclass
 class Trade:
-    date: object              # 成交日（datetime）
+    date: object  # 成交日（datetime）
     symbol: str
-    direction: str            # LONG / SHORT
-    action: str               # OPEN / CLOSE
-    price: float              # 成交价（已含滑点）
-    volume: int               # 手数
-    commission: float         # 本笔手续费（元）
+    direction: str  # LONG / SHORT
+    action: str  # OPEN / CLOSE
+    price: float  # 成交价（已含滑点）
+    volume: int  # 手数
+    commission: float  # 本笔手续费（元）
     slippage_cost: float = 0.0  # 本笔滑点成本（元，信息披露用）
-    pnl: float = 0.0          # 平仓已实现盈亏（元；开仓为 0）
+    pnl: float = 0.0  # 平仓已实现盈亏（元；开仓为 0）
 
 
 class Portfolio:

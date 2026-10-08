@@ -1,9 +1,11 @@
 # quant-demo · 个人量化交易 Demo（期货回测最小闭环）
 
+![CI](https://github.com/Eeyore104/quant-demo/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
 ![Tests](https://img.shields.io/badge/tests-6%20passed-brightgreen)
 ![Market](https://img.shields.io/badge/market-China%20Futures-C8102E)
-![Status](https://img.shields.io/badge/status-MVP%20done-success)
+![Status](https://img.shields.io/badge/status-v1.0%20done-success)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 > 一个结构清晰、可一键运行、能产出专业回测报告的**个人期货量化研究项目**。
 >
@@ -132,6 +134,10 @@ quant-demo/
 | `docs/01-量化背景与前置需求.md` | 背景科普、路径对比、SimNow 科普、合规必读、前置需求 |
 | `docs/02-PRD.md` | 产品需求、验收标准、里程碑 |
 | `docs/03-系统设计与任务分解.md` | 架构设计、数据模型、任务分解、落地路线 |
+
+## 许可证
+
+本项目采用 **MIT License**，版权署名 `2026 Eeyore104`，详见 [`LICENSE`](LICENSE)。
 
 ## 常见问题
 

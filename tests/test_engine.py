@@ -1,4 +1,5 @@
 """回测引擎单元测试（手工可核对的小样本）。"""
+
 import pandas as pd
 
 from src.engine.broker import Broker
@@ -38,7 +39,9 @@ def _bar_df() -> pd.DataFrame:
 def _make_engine(signals):
     broker = Broker(commission_per_lot=1.2, slippage_ticks=1, tick_size=1.0, contract_multiplier=10)
     portfolio = Portfolio(100000, contract_multiplier=10)
-    engine = BacktestEngine(_bar_df(), StubStrategy(signals), broker=broker, portfolio=portfolio, position_size=1)
+    engine = BacktestEngine(
+        _bar_df(), StubStrategy(signals), broker=broker, portfolio=portfolio, position_size=1
+    )
     return engine, portfolio
 
 
@@ -71,7 +74,9 @@ def test_flip_short_to_long():
     # D2 开空 @ 100 - 1 = 99
     assert trades[0].action == "OPEN" and trades[0].direction == "SHORT" and trades[0].price == 99.0
     # D3 平空 @ 110 + 1 = 111，随后开多 @ 111
-    assert trades[1].action == "CLOSE" and trades[1].direction == "SHORT" and trades[1].price == 111.0
+    assert (
+        trades[1].action == "CLOSE" and trades[1].direction == "SHORT" and trades[1].price == 111.0
+    )
     assert trades[2].action == "OPEN" and trades[2].direction == "LONG" and trades[2].price == 111.0
     # 平空盈亏：(99 - 111) × 10 = -120
     assert trades[1].pnl == -120.0

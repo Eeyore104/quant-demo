@@ -1,4 +1,5 @@
 """双均线策略：快线上穿慢线做多，下穿做空。"""
+
 import pandas as pd
 
 from .base import StrategyBase

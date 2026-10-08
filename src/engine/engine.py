@@ -2,6 +2,7 @@
 
 成交约定（全项目统一）：信号在 T 日收盘产生，成交在 T+1 日开盘价 ± 滑点执行。
 """
+
 from dataclasses import dataclass
 
 import pandas as pd
@@ -69,7 +70,7 @@ class BacktestEngine:
         for i in range(1, len(self.df)):
             bar = _to_bar(self.df.iloc[i])
             sig = int(self.df["signal"].iloc[i - 1])  # T 日收盘信号
-            target = sig * self.position_size          # T+1 开盘执行
+            target = sig * self.position_size  # T+1 开盘执行
             fills = self.broker.fill(self.portfolio.position.size, target, bar)
             if fills:
                 self.portfolio.apply_trades(fills)

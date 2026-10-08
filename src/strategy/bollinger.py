@@ -1,4 +1,5 @@
 """布林带策略：收盘突破上轨做多，跌破下轨做空，回到带内空仓。"""
+
 import pandas as pd
 
 from .base import StrategyBase

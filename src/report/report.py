@@ -1,4 +1,5 @@
 """报告汇总：指标 + 图片路径 → 文本报告（并打印到控制台）。"""
+
 from pathlib import Path
 
 from ..utils.logger import get_logger

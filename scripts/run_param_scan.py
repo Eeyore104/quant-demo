@@ -3,6 +3,7 @@
 用法（在项目根目录下执行，需先跑过一次 run_backtest.py 生成数据缓存）：
     uv run python scripts/run_param_scan.py
 """
+
 import itertools
 import sys
 from pathlib import Path

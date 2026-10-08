@@ -2,6 +2,7 @@
 
 规则：先平后开；仓位翻转拆成「平仓 + 开仓」两笔成交。
 """
+
 from ..utils.logger import get_logger
 from .portfolio import Trade
 

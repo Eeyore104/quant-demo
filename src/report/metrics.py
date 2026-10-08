@@ -1,4 +1,5 @@
 """绩效指标计算（公式透明，全自研）。"""
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -7,15 +8,15 @@ import pandas as pd
 
 @dataclass
 class PerformanceMetrics:
-    total_return: float = 0.0      # 累计收益率
-    annual_return: float = 0.0     # 年化收益率
-    max_drawdown: float = 0.0      # 最大回撤
-    sharpe: float = 0.0            # 夏普比率（无风险利率按 0）
-    win_rate: float = 0.0          # 胜率（按平仓次数）
-    profit_factor: float = 0.0     # 盈亏比（总盈利 / 总亏损）
-    trade_count: int = 0           # 平仓次数
+    total_return: float = 0.0  # 累计收益率
+    annual_return: float = 0.0  # 年化收益率
+    max_drawdown: float = 0.0  # 最大回撤
+    sharpe: float = 0.0  # 夏普比率（无风险利率按 0）
+    win_rate: float = 0.0  # 胜率（按平仓次数）
+    profit_factor: float = 0.0  # 盈亏比（总盈利 / 总亏损）
+    trade_count: int = 0  # 平仓次数
     total_commission: float = 0.0  # 累计手续费（元）
-    total_slippage: float = 0.0    # 累计滑点成本（元）
+    total_slippage: float = 0.0  # 累计滑点成本（元）
 
 
 def max_drawdown(equity: pd.Series) -> float:

@@ -1,4 +1,5 @@
 """清洗逻辑单元测试。"""
+
 import pandas as pd
 
 from src.data.cleaner import clean

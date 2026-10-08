@@ -1,4 +1,5 @@
 """图表绘制：matplotlib → PNG（Windows 中文字体设置）。"""
+
 from pathlib import Path
 
 import matplotlib
@@ -17,9 +18,15 @@ def plot_equity(equity_df, out_path) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(equity_df["date"], equity_df["equity"], color="#1976d2", linewidth=1.5, label="账户权益")
+    ax.plot(
+        equity_df["date"], equity_df["equity"], color="#1976d2", linewidth=1.5, label="账户权益"
+    )
     ax.axhline(
-        y=equity_df["equity"].iloc[0], color="#9e9e9e", linestyle="--", linewidth=1, label="初始资金"
+        y=equity_df["equity"].iloc[0],
+        color="#9e9e9e",
+        linestyle="--",
+        linewidth=1,
+        label="初始资金",
     )
     ax.set_title("权益曲线")
     ax.set_ylabel("权益（元）")

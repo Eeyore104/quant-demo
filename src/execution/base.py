@@ -4,6 +4,7 @@
 组装成同样的上下文去调用策略的 on_bar()，策略代码不改 ——
 「回测 → 仿真 → 实盘」共用同一套策略，这是预留的执行层插槽。
 """
+
 from abc import ABC, abstractmethod
 
 
@@ -19,7 +20,9 @@ class ExecutionAdapter(ABC):
         """订阅行情。"""
 
     @abstractmethod
-    def send_order(self, symbol: str, direction: str, offset: str, price: float, volume: int) -> str:
+    def send_order(
+        self, symbol: str, direction: str, offset: str, price: float, volume: int
+    ) -> str:
         """下单：direction=LONG/SHORT，offset=OPEN/CLOSE，返回订单号。"""
 
     @abstractmethod

@@ -1,6 +1,6 @@
 [project]
 name = "quant-demo"
-version = "0.1.0"
+version = "1.0.0"
 description = "个人量化交易 Demo：期货回测最小闭环（数据 → 策略 → 回测 → 绩效报告）"
 requires-python = ">=3.12,<3.14"
 dependencies = [
@@ -12,10 +12,21 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# 脚本先插入项目根到 sys.path 再 import 项目包，E402 属预期行为
+"scripts/*.py" = ["E402"]
 
 # 国内镜像：加速依赖安装（清华 PyPI 源）
 [[tool.uv.index]]

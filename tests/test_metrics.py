@@ -1,4 +1,5 @@
 """绩效指标单元测试。"""
+
 import pandas as pd
 import pytest
 
@@ -8,8 +9,15 @@ from src.report.metrics import analyze, max_drawdown, sharpe_ratio
 
 def _trade(action: str, pnl: float = 0.0) -> Trade:
     return Trade(
-        date=None, symbol="C0", direction="LONG", action=action,
-        price=100.0, volume=1, commission=1.2, slippage_cost=10.0, pnl=pnl,
+        date=None,
+        symbol="C0",
+        direction="LONG",
+        action=action,
+        price=100.0,
+        volume=1,
+        commission=1.2,
+        slippage_cost=10.0,
+        pnl=pnl,
     )
 
 
@@ -35,5 +43,5 @@ def test_analyze_basic():
     assert m.profit_factor == float("inf")  # 只有盈利、没有亏损
     assert m.total_commission == pytest.approx(2.4)
     assert m.total_slippage == pytest.approx(20.0)
-    assert m.total_return == pytest.approx(-0.01)                      # 99000/100000 - 1
-    assert m.max_drawdown == pytest.approx(99000.0 / 101000.0 - 1.0)   # ≈ -0.0198
+    assert m.total_return == pytest.approx(-0.01)  # 99000/100000 - 1
+    assert m.max_drawdown == pytest.approx(99000.0 / 101000.0 - 1.0)  # ≈ -0.0198

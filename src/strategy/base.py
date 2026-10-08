@@ -4,6 +4,7 @@
 - 实盘（P1/P2 预留）：ExecutionAdapter 把实时行情组装成 ctx 调用 on_bar()，
   策略代码保持不变 —— 这是「回测 → 仿真 → 实盘」共用一套策略的地基。
 """
+
 from abc import ABC, abstractmethod
 
 import pandas as pd
