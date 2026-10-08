@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 数据与产物（可重新生成）
+data/raw/*
+data/clean/*
+output/
+!data/raw/.gitkeep
+!data/clean/.gitkeep
+
+# 测试与检查缓存
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# IDE
+.idea/
+.vscode/

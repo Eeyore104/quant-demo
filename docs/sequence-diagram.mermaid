@@ -1,0 +1,71 @@
+%% 关键流程时序图 1：数据获取 → 入库 → 清洗
+sequenceDiagram
+    autonumber
+    participant U as run_backtest.py
+    participant Cfg as ConfigLoader
+    participant L as DataLoader
+    participant S as DataStore
+    participant AK as akshare
+    participant Cl as DataCleaner
+
+    U->>Cfg: load("config/config.yaml")
+    Cfg-->>U: {symbol, period, start, end, ...}
+    U->>L: fetch(symbol, start, end)
+    L->>S: exists_cache(symbol)?
+    alt 本地已有缓存
+        S-->>L: 命中，读 data/raw/C0.csv
+    else 无缓存
+        L->>AK: futures_main_sina("C0", start, end)
+        AK-->>L: 原始 DataFrame（中文列名）
+        L->>L: 统一列名 + 落地
+        L->>S: save(data/raw/C0.csv)
+    end
+    L-->>U: raw DataFrame
+    U->>Cl: clean(raw)
+    Cl->>Cl: 去重 → 去0成交量 → 升序 → 设date索引
+    Cl->>S: save(data/clean/C0_clean.csv)
+    Cl-->>U: clean DataFrame
+
+%% 关键流程时序图 2：回测运行（bar 推进 → 信号 → 撮合 → 记录）
+sequenceDiagram
+    autonumber
+    participant U as run_backtest.py
+    participant E as BacktestEngine
+    participant St as StrategyBase
+    participant B as Broker
+    participant P as Portfolio
+
+    U->>E: init(df, strategy, broker, portfolio, capital)
+    E->>St: generate_signals(df)
+    St-->>E: df 带 signal 列
+    loop 每个交易日 bar
+        E->>P: update(bar)
+        E->>St: on_bar(ctx)
+        St-->>E: target_position
+        alt 目标仓位 != 当前仓位
+            E->>B: fill(target_position, next_open_bar)
+            B->>B: 计价滑点 + 手续费
+            B-->>E: [Trade, ...]
+            E->>P: apply_trades(trades)
+        end
+        E->>P: record_equity()
+    end
+    E-->>U: equity_curve + trades
+
+%% 关键流程时序图 3：绩效报告生成
+sequenceDiagram
+    autonumber
+    participant U as run_backtest.py
+    participant PA as PerformanceAnalyzer
+    participant CP as ChartPlotter
+    participant RG as ReportGenerator
+
+    U->>PA: analyze(equity_curve, trades)
+    PA->>PA: total/annual return, max_drawdown, sharpe, win_rate, profit_factor
+    PA-->>U: PerformanceMetrics
+    U->>CP: plot_equity(equity_curve)
+    CP-->>U: output/figures/equity.png
+    U->>CP: plot_signals(df, trades)
+    CP-->>U: output/figures/signals.png
+    U->>RG: generate(metrics, figures, out_dir)
+    RG-->>U: output/reports/backtest_report.txt

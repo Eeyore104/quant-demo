@@ -1,0 +1,24 @@
+[project]
+name = "quant-demo"
+version = "0.1.0"
+description = "个人量化交易 Demo：期货回测最小闭环（数据 → 策略 → 回测 → 绩效报告）"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "akshare>=1.18",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# 国内镜像：加速依赖安装（清华 PyPI 源）
+[[tool.uv.index]]
+name = "tsinghua"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true

@@ -1,0 +1,126 @@
+classDiagram
+    class Bar {
+        +date: date
+        +symbol: str
+        +open: float
+        +high: float
+        +low: float
+        +close: float
+        +volume: int
+        +open_interest: int
+    }
+
+    class StrategyBase {
+        <<abstract>>
+        +params: dict
+        +__init__(params: dict)
+        +on_bar(ctx: dict) int
+        +generate_signals(df: DataFrame) DataFrame
+        #_calc_indicators(df: DataFrame) DataFrame
+    }
+
+    class DualMAStrategy {
+        +fast: int
+        +slow: int
+        +_calc_indicators(df) DataFrame
+        +on_bar(ctx) int
+    }
+
+    class BollingerStrategy {
+        +window: int
+        +num_std: float
+        +_calc_indicators(df) DataFrame
+        +on_bar(ctx) int
+    }
+
+    class BacktestEngine {
+        +data: DataFrame
+        +strategy: StrategyBase
+        +broker: Broker
+        +portfolio: Portfolio
+        +initial_capital: float
+        +run() DataFrame
+    }
+
+    class Broker {
+        +commission_per_lot: float
+        +slippage_ticks: int
+        +tick_size: float
+        +fill(target_pos: int, bar: Bar) list~Trade~
+        +_calc_commission(volume) float
+        +_apply_slippage(price, direction) float
+    }
+
+    class Portfolio {
+        +cash: float
+        +position: Position
+        +equity_curve: list
+        +update(bar: Bar) void
+        +equity() float
+    }
+
+    class Position {
+        +symbol: str
+        +size: int
+        +avg_price: float
+        +unrealized_pnl: float
+    }
+
+    class Trade {
+        +date: date
+        +symbol: str
+        +direction: str
+        +action: str
+        +price: float
+        +volume: int
+        +commission: float
+        +slippage_cost: float
+        +pnl: float
+    }
+
+    class PerformanceAnalyzer {
+        +analyze(equity_curve, trades) PerformanceMetrics
+        +max_drawdown(equity) float
+        +sharpe(returns) float
+        +win_rate(trades) float
+        +profit_factor(trades) float
+    }
+
+    class ReportGenerator {
+        +metrics: PerformanceMetrics
+        +generate(equity_curve, trades, out_dir) str
+    }
+
+    class ChartPlotter {
+        +plot_equity(equity_curve, path) str
+        +plot_signals(df, trades, path) str
+    }
+
+    class ParamScanner {
+        +grid: dict
+        +scan(strategy_cls, df, grid) DataFrame
+    }
+
+    class ExecutionAdapter {
+        <<abstract, reserved>>
+        +connect(cfg) void
+        +subscribe(symbol) void
+        +send_order(order) str
+        +on_market_data() Bar
+    }
+
+    StrategyBase <|-- DualMAStrategy
+    StrategyBase <|-- BollingerStrategy
+    BacktestEngine o-- StrategyBase
+    BacktestEngine o-- Broker
+    BacktestEngine o-- Portfolio
+    Portfolio o-- Position
+    Broker ..> Trade : creates
+    BacktestEngine ..> Trade : records
+    Portfolio ..> Bar : consumes
+    PerformanceAnalyzer ..> Trade : reads
+    PerformanceAnalyzer ..> PerformanceMetrics : produces
+    ReportGenerator o-- PerformanceAnalyzer
+    ReportGenerator o-- ChartPlotter
+    ParamScanner ..> BacktestEngine : drives
+    StrategyBase ..> ExecutionAdapter : same interface reused live

@@ -1,0 +1,33 @@
+# ================================================
+# quant-demo 配置文件
+# 改这里就能换品种 / 周期 / 策略 / 成本，无需动代码
+# ================================================
+
+data:
+  symbol: "C0"                  # 玉米主力连续（C0 = 玉米主连，akshare 惯例）
+  start_date: "2021-10-01"      # 回测起始（近 5 年）
+  end_date: "2026-10-01"        # 回测结束
+  raw_dir: "data/raw"           # 原始数据缓存目录
+  clean_dir: "data/clean"       # 清洗后数据目录
+
+strategy:
+  name: "dual_ma"               # dual_ma 双均线 | bollinger 布林带
+  params:
+    dual_ma:
+      fast: 5                   # 快均线周期
+      slow: 20                  # 慢均线周期
+    bollinger:
+      window: 20                # 布林带中轨周期
+      num_std: 2.0              # 上下轨标准差倍数
+
+backtest:
+  initial_capital: 100000       # 初始资金（元）
+  position_size: 1              # 目标仓位（手）——MVP 固定 1 手
+  commission_per_lot: 1.2       # 手续费（元/手），玉米约 1.2
+  slippage_ticks: 1             # 滑点（跳数）
+  tick_size: 1.0                # 最小变动价位（玉米 1 元/吨）
+  contract_multiplier: 10       # 合约乘数（玉米 10 吨/手）
+
+output:
+  figure_dir: "output/figures"  # 图表输出目录
+  report_dir: "output/reports"  # 报告输出目录
