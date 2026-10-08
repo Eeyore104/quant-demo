@@ -113,6 +113,8 @@ quant-demo/
 | 换策略 | `strategy.name` | `dual_ma` / `bollinger` / `donchian` |
 | 调参数 | `strategy.params` | 双均线 `fast: 5, slow: 20` |
 | 调成本 | `backtest.commission_per_lot` / `slippage_ticks` | 手续费 1.2 元/手、滑点 1 跳 |
+
+> 不知道有哪些品种可用？运行 `uv run python scripts/list_symbols.py` 查看全部 80+ 个主力连续合约（代码 / 名称 / 交易所）。
 | 样本外分段 | `backtest.oos.split_date`（优先）/ `ratio` | `2024-10-01` 或 `0.7` |
 | 参数网格 | `strategy.grid.<策略名>` | 参数扫描逐格遍历 |
 
