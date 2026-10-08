@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### Added
+- 全部输出标注品种（如「玉米 C0（主力连续）」）：绩效报告头、样本外对比表、5 张图表标题、参数扫描控制台与 CSV（新增 `symbol` 列）。
+
 ### Fixed
 - 样本外验证边界兜底：训练段为空（如 `split_date` 早于数据起点）时改为 WARN 并跳过，不再抛异常崩溃；空串 `split_date` 视为未提供，回退按 `ratio` 切分。
 - 修复 `walkforward` 日志重复打印：复用 `engine` logger，避免子 logger 向父 logger 冒泡导致每条日志打两遍。

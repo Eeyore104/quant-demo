@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd
 
 from src.data import store
+from src.data.symbols import instrument_label
 from src.engine.broker import Broker
 from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
@@ -62,6 +63,7 @@ def main() -> None:
         raise SystemExit("未找到数据缓存，请先运行：uv run python run_backtest.py")
     df = store.load_csv(clean_path)
     df["date"] = pd.to_datetime(df["date"])
+    label = instrument_label(d["symbol"])
 
     rows = []
     for combo in _build_grid(grid):
@@ -89,6 +91,7 @@ def main() -> None:
                 "win_rate": round(m.win_rate, 4),
                 "trade_count": m.trade_count,
                 "commission": round(m.total_commission, 2),
+                "symbol": d["symbol"],
             }
         )
 
@@ -98,11 +101,12 @@ def main() -> None:
     result.to_csv(out_path, index=False, encoding="utf-8-sig")
 
     print()
+    print(f"品种：{label} | 策略：{name}")
     print(result.to_string(index=False))
     log.info("参数对比表已保存：%s", out_path)
 
     heatmap_path = plot_param_heatmap(
-        result, resolve_path(f"output/figures/param_heatmap_{name}.png")
+        result, resolve_path(f"output/figures/param_heatmap_{name}.png"), label=label
     )
     if heatmap_path:
         log.info("参数扫描热力图已保存：%s", heatmap_path)

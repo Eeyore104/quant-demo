@@ -14,8 +14,13 @@ plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Arial Unicode M
 plt.rcParams["axes.unicode_minus"] = False
 
 
-def plot_equity(equity_df, out_path) -> str:
-    """权益曲线图。"""
+def _titled(label: str, text: str) -> str:
+    """给图表标题加上品种前缀（如「玉米 C0（主力连续） · 权益曲线」）。"""
+    return f"{label} · {text}" if label else text
+
+
+def plot_equity(equity_df, out_path, label: str = "") -> str:
+    """权益曲线图（``label`` 为品种标注，如 "玉米 C0（主力连续）"）。"""
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
 
@@ -30,7 +35,7 @@ def plot_equity(equity_df, out_path) -> str:
         linewidth=1,
         label="初始资金",
     )
-    ax.set_title("权益曲线")
+    ax.set_title(_titled(label, "权益曲线"))
     ax.set_ylabel("权益（元）")
     ax.legend()
     ax.grid(alpha=0.3)
@@ -40,7 +45,7 @@ def plot_equity(equity_df, out_path) -> str:
     return str(p)
 
 
-def plot_signals(df, trades, out_path) -> str:
+def plot_signals(df, trades, out_path, label: str = "") -> str:
     """价格 + 均线/布林带 + 买卖点标注图。"""
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -69,7 +74,7 @@ def plot_signals(df, trades, out_path) -> str:
     if sells_x:
         ax.scatter(sells_x, sells_y, marker="v", color="#2e7d32", s=40, zorder=5, label="卖出")
 
-    ax.set_title("价格与买卖点")
+    ax.set_title(_titled(label, "价格与买卖点"))
     ax.set_ylabel("价格（元/吨）")
     ax.legend(loc="best", fontsize=8)
     ax.grid(alpha=0.3)
@@ -79,7 +84,7 @@ def plot_signals(df, trades, out_path) -> str:
     return str(p)
 
 
-def plot_drawdown(equity_df, out_path) -> str:
+def plot_drawdown(equity_df, out_path, label: str = "") -> str:
     """回撤区间图：绘制回撤曲线（%）并高亮最大回撤区间。"""
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -109,7 +114,7 @@ def plot_drawdown(equity_df, out_path) -> str:
     )
 
     ax.axhline(0, color="#9e9e9e", linewidth=0.8)
-    ax.set_title("回撤区间图")
+    ax.set_title(_titled(label, "回撤区间图"))
     ax.set_ylabel("回撤（%）")
     ax.legend(loc="lower left", fontsize=8)
     ax.grid(alpha=0.3)
@@ -119,7 +124,7 @@ def plot_drawdown(equity_df, out_path) -> str:
     return str(p)
 
 
-def plot_monthly_heatmap(equity_df, out_path) -> str:
+def plot_monthly_heatmap(equity_df, out_path, label: str = "") -> str:
     """月度收益热力图：按 年 × 月 排列（口径=权益月收益率，%）。"""
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -157,7 +162,7 @@ def plot_monthly_heatmap(equity_df, out_path) -> str:
                 ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=7, color="#212121")
 
     fig.colorbar(im, ax=ax, label="月收益（%）", fraction=0.025, pad=0.02)
-    ax.set_title("月度收益热力图（口径：权益月收益率）")
+    ax.set_title(_titled(label, "月度收益热力图（口径：权益月收益率）"))
     fig.tight_layout()
     fig.savefig(p, dpi=120)
     plt.close(fig)
@@ -167,15 +172,16 @@ def plot_monthly_heatmap(equity_df, out_path) -> str:
 _METRIC_COLS = {"total_return", "max_drawdown", "sharpe", "win_rate", "trade_count", "commission"}
 
 
-def plot_param_heatmap(scan_df, out_path, metric: str = "sharpe") -> str:
+def plot_param_heatmap(scan_df, out_path, metric: str = "sharpe", label: str = "") -> str:
     """参数扫描热力图：两个参数为平面、选定绩效指标为色阶。
 
     参数仅 1 个时退化为「按参数着色的柱状图」。无参数列时返回空串。
+    ``label`` 为品种标注（如 "玉米 C0（主力连续）"）。
     """
     p = Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
 
-    param_cols = [c for c in scan_df.columns if c not in _METRIC_COLS]
+    param_cols = [c for c in scan_df.columns if c not in _METRIC_COLS and c != "symbol"]
     if not param_cols:
         return ""
 
@@ -196,7 +202,7 @@ def plot_param_heatmap(scan_df, out_path, metric: str = "sharpe") -> str:
                 if np.isfinite(values[i, j]):
                     ax.text(j, i, f"{values[i, j]:.2f}", ha="center", va="center", fontsize=8)
         fig.colorbar(im, ax=ax, label=metric)
-        ax.set_title(f"参数扫描热力图（{metric}）")
+        ax.set_title(_titled(label, f"参数扫描热力图（{metric}）"))
     else:
         key = param_cols[0]
         data = scan_df.sort_values(key)
@@ -205,7 +211,7 @@ def plot_param_heatmap(scan_df, out_path, metric: str = "sharpe") -> str:
         ax.bar([str(v) for v in data[key]], vals, color=colors)
         ax.set_xlabel(key)
         ax.set_ylabel(metric)
-        ax.set_title(f"参数扫描（{metric}）")
+        ax.set_title(_titled(label, f"参数扫描（{metric}）"))
         ax.grid(alpha=0.3, axis="y")
 
     fig.tight_layout()

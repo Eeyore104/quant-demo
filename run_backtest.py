@@ -7,6 +7,7 @@
 import pandas as pd
 
 from src.data import cleaner, loader, store
+from src.data.symbols import instrument_label
 from src.engine.broker import Broker
 from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
@@ -46,10 +47,11 @@ def main() -> None:
     log = get_logger("main")
     cfg = load_config()
     d, s, b, out = cfg["data"], cfg["strategy"], cfg["backtest"], cfg["output"]
+    label = instrument_label(d["symbol"])
 
     # ① 数据
     df = load_data(d, log)
-    log.info("数据就绪：%d 根 bar", len(df))
+    log.info("数据就绪：%s · %d 根 bar", label, len(df))
 
     # ② 策略（自动注册表：新增策略 = 新增一个文件，此处无需改动）
     name = s["name"]
@@ -80,16 +82,21 @@ def main() -> None:
 
     # ④ 绩效 + 图表 + 报告
     m = metrics_mod.analyze(equity_df, trades, b["initial_capital"])
-    eq_png = plot_equity(equity_df, resolve_path(f"{out['figure_dir']}/equity.png"))
-    sig_png = plot_signals(engine.df, trades, resolve_path(f"{out['figure_dir']}/signals.png"))
-    dd_png = plot_drawdown(equity_df, resolve_path(f"{out['figure_dir']}/drawdown.png"))
+    eq_png = plot_equity(equity_df, resolve_path(f"{out['figure_dir']}/equity.png"), label=label)
+    sig_png = plot_signals(
+        engine.df, trades, resolve_path(f"{out['figure_dir']}/signals.png"), label=label
+    )
+    dd_png = plot_drawdown(
+        equity_df, resolve_path(f"{out['figure_dir']}/drawdown.png"), label=label
+    )
     mh_png = plot_monthly_heatmap(
-        equity_df, resolve_path(f"{out['figure_dir']}/monthly_heatmap.png")
+        equity_df, resolve_path(f"{out['figure_dir']}/monthly_heatmap.png"), label=label
     )
 
     params_desc = ", ".join(f"{k}={v}" for k, v in params.items())
     header = [
-        f"品种       : {d['symbol']}（{d['start_date']} ~ {d['end_date']}）",
+        f"品种       : {label}",
+        f"区间       : {d['start_date']} ~ {d['end_date']}",
         f"策略       : {name}({params_desc})",
         f"初始资金   : {b['initial_capital']:.0f} 元 / 固定 {b['position_size']} 手",
         f"成本设定   : 手续费 {b['commission_per_lot']} 元/手，滑点 {b['slippage_ticks']} 跳",
@@ -114,7 +121,7 @@ def main() -> None:
             if oos.skipped:
                 log.warning("样本外验证已跳过（训练段为空，请检查 backtest.oos.split_date）")
             else:
-                extra_sections.append(build_oos_table(oos))
+                extra_sections.append(build_oos_table(oos, label=label))
         else:
             log.warning("样本外验证跳过：config.strategy.grid 缺少 %s 的网格", name)
 

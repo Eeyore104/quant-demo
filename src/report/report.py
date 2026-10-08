@@ -35,7 +35,7 @@ def _fmt_range(rng: tuple) -> str:
     return f"{s} ~ {e}"
 
 
-def build_oos_table(oos) -> str:
+def build_oos_table(oos, label: str = "") -> str:
     """渲染样本外验证对比表（明确标注：训练段=样本内、测试段=样本外）。"""
     tm = oos.train_metrics
     sm = oos.test_metrics
@@ -58,9 +58,12 @@ def build_oos_table(oos) -> str:
         + _pad(f"{sm.max_drawdown:>8.2%}", 12)
         + f"{sm.sharpe:>6.2f}   ← 检验"
     )
+    title = "样本外验证（训练段择优 → 测试段检验）"
+    if label:
+        title = f"样本外验证 · {label}（训练段择优 → 测试段检验）"
     return "\n".join(
         [
-            "============= 样本外验证（训练段择优 → 测试段检验）=============",
+            f"============= {title} =============",
             header,
             row_train,
             row_test,
