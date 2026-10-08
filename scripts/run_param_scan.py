@@ -1,7 +1,11 @@
-"""参数扫描：双均线快/慢参数网格 → 参数-绩效对比表（CSV + 控制台）。
+"""参数扫描：按 ``config.strategy.grid`` 遍历任意策略的参数网格 → 对比表（CSV + 控制台）。
 
 用法（在项目根目录下执行，需先跑过一次 run_backtest.py 生成数据缓存）：
-    uv run python scripts/run_param_scan.py
+
+    uv run python scripts/run_param_scan.py          # 扫描 config.strategy.name 指定的策略
+    uv run python scripts/run_param_scan.py donchian # 也可显式指定策略名
+
+因为网格统一放在配置里、策略实例由注册表创建，所以**新增策略无需改本脚本**。
 """
 
 import itertools
@@ -19,19 +23,38 @@ from src.engine.broker import Broker
 from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
 from src.report import metrics as metrics_mod
-from src.strategy.dual_ma import DualMAStrategy
+from src.strategy.registry import get_strategy
 from src.utils.config_loader import load_config, resolve_path
 from src.utils.logger import get_logger
 
-# 参数网格（可按需调整）
-FAST_LIST = [5, 10, 15]
-SLOW_LIST = [20, 40, 60]
+
+def _build_grid(grid: dict) -> list[dict]:
+    """把 ``{参数: [取值...]}`` 展开为参数组合列表（等价 itertools.product）。"""
+    keys = list(grid)
+    return [
+        dict(zip(keys, values, strict=True))
+        for values in itertools.product(*(grid[k] for k in keys))
+    ]
+
+
+def _is_valid(combo: dict) -> bool:
+    """跳过非法组合：如双均线要求 fast < slow。"""
+    if "fast" in combo and "slow" in combo and combo["fast"] >= combo["slow"]:
+        return False
+    return True
 
 
 def main() -> None:
     log = get_logger("param_scan")
     cfg = load_config()
-    d, b = cfg["data"], cfg["backtest"]
+    d, b, s = cfg["data"], cfg["backtest"], cfg["strategy"]
+
+    # 策略名：命令行优先，否则取 config.strategy.name
+    name = sys.argv[1] if len(sys.argv) > 1 else s["name"]
+    strategy_cls = get_strategy(name)
+    grid = s.get("grid", {}).get(name)
+    if not grid:
+        raise SystemExit(f"config.strategy.grid 缺少策略 {name} 的网格，请在 config.yaml 补充")
 
     clean_path = resolve_path(f"{d['clean_dir']}/{d['symbol']}_clean.csv")
     if not store.exists(clean_path):
@@ -40,10 +63,10 @@ def main() -> None:
     df["date"] = pd.to_datetime(df["date"])
 
     rows = []
-    for fast, slow in itertools.product(FAST_LIST, SLOW_LIST):
-        if fast >= slow:
+    for combo in _build_grid(grid):
+        if not _is_valid(combo):
             continue
-        strategy = DualMAStrategy({"fast": fast, "slow": slow})
+        strategy = strategy_cls(combo)
         broker = Broker(
             commission_per_lot=b["commission_per_lot"],
             slippage_ticks=b["slippage_ticks"],
@@ -58,8 +81,7 @@ def main() -> None:
         m = metrics_mod.analyze(equity_df, trades, b["initial_capital"])
         rows.append(
             {
-                "fast": fast,
-                "slow": slow,
+                **combo,
                 "total_return": round(m.total_return, 4),
                 "max_drawdown": round(m.max_drawdown, 4),
                 "sharpe": round(m.sharpe, 3),
@@ -70,7 +92,7 @@ def main() -> None:
         )
 
     result = pd.DataFrame(rows).sort_values("sharpe", ascending=False).reset_index(drop=True)
-    out_path = resolve_path("output/reports/param_scan_dual_ma.csv")
+    out_path = resolve_path(f"output/reports/param_scan_{name}.csv")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(out_path, index=False, encoding="utf-8-sig")
 

@@ -11,7 +11,7 @@ data:
   clean_dir: "data/clean"       # 清洗后数据目录
 
 strategy:
-  name: "dual_ma"               # dual_ma 双均线 | bollinger 布林带
+  name: "dual_ma"               # dual_ma 双均线 | bollinger 布林带 | donchian 唐奇安通道
   params:
     dual_ma:
       fast: 5                   # 快均线周期
@@ -19,6 +19,12 @@ strategy:
     bollinger:
       window: 20                # 布林带中轨周期
       num_std: 2.0              # 上下轨标准差倍数
+    donchian:
+      window: 20                # 唐奇安通道周期（突破周期）
+  grid:                         # 参数扫描网格（每个策略一份，扫描器自动读取）
+    dual_ma: { fast: [5, 10, 15], slow: [20, 40, 60] }
+    bollinger: { window: [10, 20, 30], num_std: [1.5, 2.0, 2.5] }
+    donchian: { window: [10, 20, 30, 55] }
 
 backtest:
   initial_capital: 100000       # 初始资金（元）

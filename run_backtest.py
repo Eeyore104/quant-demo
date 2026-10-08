@@ -13,12 +13,9 @@ from src.engine.portfolio import Portfolio
 from src.report import metrics as metrics_mod
 from src.report.plotter import plot_equity, plot_signals
 from src.report.report import build_report_text, save_report
-from src.strategy.bollinger import BollingerStrategy
-from src.strategy.dual_ma import DualMAStrategy
+from src.strategy.registry import get_strategy
 from src.utils.config_loader import load_config, resolve_path
 from src.utils.logger import get_logger
-
-STRATEGIES = {"dual_ma": DualMAStrategy, "bollinger": BollingerStrategy}
 
 
 def load_data(d: dict, log):
@@ -53,12 +50,10 @@ def main() -> None:
     df = load_data(d, log)
     log.info("数据就绪：%d 根 bar", len(df))
 
-    # ② 策略
+    # ② 策略（自动注册表：新增策略 = 新增一个文件，此处无需改动）
     name = s["name"]
-    if name not in STRATEGIES:
-        raise SystemExit(f"未知策略: {name}（可选: {list(STRATEGIES)}）")
     params = s["params"].get(name, {})
-    strategy = STRATEGIES[name](params)
+    strategy = get_strategy(name)(params)
     log.info("策略: %s %s | 初始资金: %.0f 元", name, params, b["initial_capital"])
 
     # ③ 回测
