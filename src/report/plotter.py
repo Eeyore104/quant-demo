@@ -3,6 +3,8 @@
 from pathlib import Path
 
 import matplotlib
+import numpy as np
+import pandas as pd
 
 matplotlib.use("Agg")  # 无需 GUI，直接出图
 import matplotlib.pyplot as plt
@@ -71,6 +73,141 @@ def plot_signals(df, trades, out_path) -> str:
     ax.set_ylabel("价格（元/吨）")
     ax.legend(loc="best", fontsize=8)
     ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(p, dpi=120)
+    plt.close(fig)
+    return str(p)
+
+
+def plot_drawdown(equity_df, out_path) -> str:
+    """回撤区间图：绘制回撤曲线（%）并高亮最大回撤区间。"""
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    equity = equity_df["equity"].astype(float)
+    dates = equity_df["date"]
+    peak = equity.cummax()
+    dd = (equity / peak - 1.0) * 100.0  # 百分比口径
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.fill_between(dates, dd, 0, color="#ef5350", alpha=0.30)
+    ax.plot(dates, dd, color="#c62828", linewidth=1.2, label="回撤（%）")
+
+    # 最大回撤区间：谷底为回撤最深处，起点取其之前的权益峰值
+    dd_values = dd.to_numpy()
+    trough_pos = int(dd_values.argmin())
+    peak_pos = int(equity.iloc[: trough_pos + 1].to_numpy().argmax())
+    ax.axvspan(dates.iloc[peak_pos], dates.iloc[trough_pos], color="#ffcc80", alpha=0.35)
+    ax.scatter([dates.iloc[trough_pos]], [dd_values[trough_pos]], color="#b71c1c", s=35, zorder=5)
+    ax.annotate(
+        f"最大回撤 {dd_values[trough_pos]:.2f}%",
+        xy=(dates.iloc[trough_pos], dd_values[trough_pos]),
+        xytext=(8, -6),
+        textcoords="offset points",
+        color="#b71c1c",
+        fontsize=9,
+    )
+
+    ax.axhline(0, color="#9e9e9e", linewidth=0.8)
+    ax.set_title("回撤区间图")
+    ax.set_ylabel("回撤（%）")
+    ax.legend(loc="lower left", fontsize=8)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(p, dpi=120)
+    plt.close(fig)
+    return str(p)
+
+
+def plot_monthly_heatmap(equity_df, out_path) -> str:
+    """月度收益热力图：按 年 × 月 排列（口径=权益月收益率，%）。"""
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    equity = equity_df["equity"].astype(float)
+    idx = pd.to_datetime(equity_df["date"])
+    series = pd.Series(equity.to_numpy(), index=idx).sort_index()
+
+    daily_ret = series.pct_change().fillna(0.0)
+    monthly = (1.0 + daily_ret).resample("ME").prod() - 1.0
+
+    frame = monthly.to_frame("ret")
+    frame["year"] = frame.index.year
+    frame["month"] = frame.index.month
+    pivot = frame.pivot_table(index="year", columns="month", values="ret")
+    pivot = pivot.reindex(columns=range(1, 13))
+    values = pivot.to_numpy(dtype=float) * 100.0
+
+    fig, ax = plt.subplots(figsize=(10, 1.2 + 0.6 * len(pivot.index)))
+    abs_vals = np.abs(values)
+    vmax = float(np.nanmax(abs_vals)) if np.isfinite(abs_vals).any() else 1.0
+    vmax = max(vmax, 1e-6)
+    im = ax.imshow(values, cmap="RdYlGn", vmin=-vmax, vmax=vmax, aspect="auto")
+    ax.set_xticks(range(12))
+    ax.set_xticklabels([f"{m}月" for m in range(1, 13)])
+    ax.set_yticks(range(len(pivot.index)))
+    ax.set_yticklabels([str(y) for y in pivot.index])
+    ax.set_xlabel("月份")
+    ax.set_ylabel("年份")
+
+    for i in range(values.shape[0]):
+        for j in range(values.shape[1]):
+            v = values[i, j]
+            if np.isfinite(v):
+                ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=7, color="#212121")
+
+    fig.colorbar(im, ax=ax, label="月收益（%）", fraction=0.025, pad=0.02)
+    ax.set_title("月度收益热力图（口径：权益月收益率）")
+    fig.tight_layout()
+    fig.savefig(p, dpi=120)
+    plt.close(fig)
+    return str(p)
+
+
+_METRIC_COLS = {"total_return", "max_drawdown", "sharpe", "win_rate", "trade_count", "commission"}
+
+
+def plot_param_heatmap(scan_df, out_path, metric: str = "sharpe") -> str:
+    """参数扫描热力图：两个参数为平面、选定绩效指标为色阶。
+
+    参数仅 1 个时退化为「按参数着色的柱状图」。无参数列时返回空串。
+    """
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    param_cols = [c for c in scan_df.columns if c not in _METRIC_COLS]
+    if not param_cols:
+        return ""
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    if len(param_cols) >= 2:
+        x_key, y_key = param_cols[0], param_cols[1]
+        pivot = scan_df.pivot_table(index=y_key, columns=x_key, values=metric)
+        values = pivot.to_numpy(dtype=float)
+        im = ax.imshow(values, cmap="RdYlGn", aspect="auto")
+        ax.set_xticks(range(pivot.shape[1]))
+        ax.set_xticklabels([str(v) for v in pivot.columns])
+        ax.set_yticks(range(pivot.shape[0]))
+        ax.set_yticklabels([str(v) for v in pivot.index])
+        ax.set_xlabel(x_key)
+        ax.set_ylabel(y_key)
+        for i in range(values.shape[0]):
+            for j in range(values.shape[1]):
+                if np.isfinite(values[i, j]):
+                    ax.text(j, i, f"{values[i, j]:.2f}", ha="center", va="center", fontsize=8)
+        fig.colorbar(im, ax=ax, label=metric)
+        ax.set_title(f"参数扫描热力图（{metric}）")
+    else:
+        key = param_cols[0]
+        data = scan_df.sort_values(key)
+        vals = data[metric].to_numpy(dtype=float)
+        colors = plt.cm.RdYlGn(plt.Normalize(vals.min(), vals.max())(vals))
+        ax.bar([str(v) for v in data[key]], vals, color=colors)
+        ax.set_xlabel(key)
+        ax.set_ylabel(metric)
+        ax.set_title(f"参数扫描（{metric}）")
+        ax.grid(alpha=0.3, axis="y")
+
     fig.tight_layout()
     fig.savefig(p, dpi=120)
     plt.close(fig)

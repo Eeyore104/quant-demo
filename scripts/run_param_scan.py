@@ -23,6 +23,7 @@ from src.engine.broker import Broker
 from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
 from src.report import metrics as metrics_mod
+from src.report.plotter import plot_param_heatmap
 from src.strategy.registry import get_strategy
 from src.utils.config_loader import load_config, resolve_path
 from src.utils.logger import get_logger
@@ -99,6 +100,12 @@ def main() -> None:
     print()
     print(result.to_string(index=False))
     log.info("参数对比表已保存：%s", out_path)
+
+    heatmap_path = plot_param_heatmap(
+        result, resolve_path(f"output/figures/param_heatmap_{name}.png")
+    )
+    if heatmap_path:
+        log.info("参数扫描热力图已保存：%s", heatmap_path)
 
 
 if __name__ == "__main__":

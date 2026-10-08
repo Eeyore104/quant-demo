@@ -21,6 +21,14 @@
 |:---:|:---:|
 | ![权益曲线](docs/images/equity.png) | ![买卖点](docs/images/signals.png) |
 
+| 回撤区间图 | 月度收益热力图 |
+|:---:|:---:|
+| ![回撤区间](docs/images/drawdown.png) | ![月度收益热力图](docs/images/monthly_heatmap.png) |
+
+| 参数扫描热力图 |
+|:---:|
+| ![参数扫描热力图](docs/images/param_heatmap_dual_ma.png) |
+
 ## 回测样例（可复现）
 
 **玉米 C0 · 近 5 年日线（1211 根）· 双均线 fast=5 / slow=20 · 已计入手续费与滑点**
@@ -51,12 +59,12 @@ uv sync
 uv run python run_backtest.py
 ```
 
-跑完在 `output/` 下得到：权益曲线图、买卖点图、绩效报告（≥5 项指标 + 成本明细）。
+跑完在 `output/` 下得到：权益曲线图、买卖点图、回撤区间图、月度收益热力图、绩效报告（含成本明细与**样本外验证对比表**）。
 
 参数对比 / 单元测试：
 
 ```powershell
-uv run python scripts/run_param_scan.py   # 参数扫描 → 参数-绩效对比表
+uv run python scripts/run_param_scan.py   # 参数扫描 → 参数-绩效对比表 + 参数扫描热力图
 uv run pytest                             # 单元测试
 ```
 
@@ -67,11 +75,12 @@ uv run pytest                             # 单元测试
 ## 功能特性
 
 - **数据层**：akshare 免费拉取期货日线；CSV 本地缓存（二次运行不联网）；自动清洗（去重 / 去无效 bar）
-- **策略层**：统一策略接口 `StrategyBase` + 双均线 / 布林带两个示例策略，新增策略只需实现一个方法
+- **策略层**：统一策略接口 `StrategyBase` + **策略自动注册表**——新增策略只需在 `src/strategy/` 放一个新文件（内置双均线 / 布林带 / 唐奇安通道三个示例），引擎与入口**零改动**
 - **引擎层**：自研轻量事件驱动回测引擎 —— T 日收盘出信号、T+1 开盘价 ± 滑点成交（**防未来函数**），内置手续费 / 滑点
-- **报告层**：10 项绩效指标 + 权益曲线 / 买卖点图（PNG）+ 参数扫描对比表
+- **研究严谨**：内置**样本外验证**（训练段参数择优 → 测试段检验），报告输出"样本内 / 样本外"对比表，主动暴露过拟合
+- **报告层**：10 项绩效指标 + 权益曲线 / 买卖点 / 回撤区间 / 月度收益热力图 / 参数扫描热力图（PNG）+ 参数扫描对比表
 - **预留执行层**：`ExecutionAdapter` 抽象接口 —— 未来接 SimNow 仿真 / CTP 实盘时，**策略代码不改**
-- **工程化**：uv 依赖管理 · pytest 单元测试 · `config.yaml` 配置驱动（改参数不碰代码）
+- **工程化**：uv 依赖管理 · ruff 代码规范 · pytest 单元测试 · GitHub Actions CI · `config.yaml` 配置驱动（改参数不碰代码）
 
 ## 目录结构
 
@@ -80,7 +89,7 @@ quant-demo/
 ├── config/config.yaml      # 全部可调参数（品种/周期/策略/成本）
 ├── src/
 │   ├── data/               # 数据层：akshare 拉取 / CSV 缓存 / 清洗
-│   ├── strategy/           # 策略层：基类 + 双均线 + 布林带
+│   ├── strategy/           # 策略层：基类 + 双均线/布林带/唐奇安 + 自动注册表
 │   ├── engine/             # 引擎层：事件驱动回测 / 撮合 / 持仓
 │   ├── report/             # 报告层：绩效指标 / 图表 / 报告
 │   ├── execution/          # 【预留】SimNow/CTP 实盘适配接口
@@ -101,9 +110,11 @@ quant-demo/
 |---|---|---|
 | 换品种 | `data.symbol` | `C0`（玉米主连）→ `M0`（豆粕主连） |
 | 换回测区间 | `data.start_date` / `end_date` | `2021-10-01` ~ `2026-10-01` |
-| 换策略 | `strategy.name` | `dual_ma` / `bollinger` |
+| 换策略 | `strategy.name` | `dual_ma` / `bollinger` / `donchian` |
 | 调参数 | `strategy.params` | 双均线 `fast: 5, slow: 20` |
 | 调成本 | `backtest.commission_per_lot` / `slippage_ticks` | 手续费 1.2 元/手、滑点 1 跳 |
+| 样本外分段 | `backtest.oos.split_date`（优先）/ `ratio` | `2024-10-01` 或 `0.7` |
+| 参数网格 | `strategy.grid.<策略名>` | 参数扫描逐格遍历 |
 
 ## 设计要点（为什么这么做）
 
@@ -117,7 +128,8 @@ quant-demo/
 ## Roadmap
 
 - [x] **M1–M5 回测最小闭环**（作品集级）：数据 → 策略 → 回测 → 报告 → 参数对比
-- [ ] **M6–M7 研究平台化 + 仿真**：多策略框架、本地数据库、SimNow 模拟盘接入
+- [x] **v1.0 交付级完善**：CI / License / 代码规范 / 样本外验证 / 参数扫描热力图 / 唐奇安策略（多策略自动注册）
+- [ ] **M6–M7 研究平台化 + 仿真**：本地数据库、SimNow 模拟盘接入
 - [ ] **M8–M9 Web 看板 + 实盘准备**：可视化看板、风控模块、程序化交易报备后小资金实盘
 
 ## 合规提示（重要）
@@ -134,6 +146,8 @@ quant-demo/
 | `docs/01-量化背景与前置需求.md` | 背景科普、路径对比、SimNow 科普、合规必读、前置需求 |
 | `docs/02-PRD.md` | 产品需求、验收标准、里程碑 |
 | `docs/03-系统设计与任务分解.md` | 架构设计、数据模型、任务分解、落地路线 |
+| `docs/04-增量PRD-v1.0.md` | v1.0 增量产品需求 |
+| `docs/05-增量设计与任务列表-v1.0.md` | v1.0 增量系统设计与任务分解 |
 
 ## 许可证
 

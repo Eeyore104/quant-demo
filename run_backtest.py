@@ -12,7 +12,7 @@ from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
 from src.engine.walkforward import run_oos
 from src.report import metrics as metrics_mod
-from src.report.plotter import plot_equity, plot_signals
+from src.report.plotter import plot_drawdown, plot_equity, plot_monthly_heatmap, plot_signals
 from src.report.report import build_oos_table, build_report_text, save_report
 from src.strategy.registry import get_strategy
 from src.utils.config_loader import load_config, resolve_path
@@ -82,6 +82,10 @@ def main() -> None:
     m = metrics_mod.analyze(equity_df, trades, b["initial_capital"])
     eq_png = plot_equity(equity_df, resolve_path(f"{out['figure_dir']}/equity.png"))
     sig_png = plot_signals(engine.df, trades, resolve_path(f"{out['figure_dir']}/signals.png"))
+    dd_png = plot_drawdown(equity_df, resolve_path(f"{out['figure_dir']}/drawdown.png"))
+    mh_png = plot_monthly_heatmap(
+        equity_df, resolve_path(f"{out['figure_dir']}/monthly_heatmap.png")
+    )
 
     params_desc = ", ".join(f"{k}={v}" for k, v in params.items())
     header = [
@@ -111,7 +115,12 @@ def main() -> None:
         else:
             log.warning("样本外验证跳过：config.strategy.grid 缺少 %s 的网格", name)
 
-    figures = {"权益曲线图": eq_png, "买卖点图": sig_png}
+    figures = {
+        "权益曲线图": eq_png,
+        "买卖点图": sig_png,
+        "回撤区间图": dd_png,
+        "月度收益热力图": mh_png,
+    }
     text = build_report_text(m, header, figures, extra_sections=extra_sections)
     report_path = save_report(text, resolve_path(f"{out['report_dir']}/backtest_report.txt"))
 
