@@ -15,7 +15,7 @@
 
 import itertools
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 
@@ -24,7 +24,9 @@ from ..report.metrics import PerformanceMetrics
 from ..utils.logger import get_logger
 from .engine import BacktestEngine
 
-log = get_logger("engine.walkforward")
+# 复用 engine 的 logger：子 logger（如 "engine.walkforward"）会向父 logger 冒泡，
+# 而父子各自都被 get_logger 挂了 handler，会导致每条日志打印两遍。
+log = get_logger("engine")
 
 #: 训练段择优可用指标（均为「越大越好」口径）
 VALID_METRICS = ("sharpe", "total_return", "max_drawdown")
@@ -34,12 +36,13 @@ VALID_METRICS = ("sharpe", "total_return", "max_drawdown")
 class OOSResult:
     """样本外验证结果（训练段择优 → 测试段检验）。"""
 
-    best_params: dict  # 训练段择优参数
-    train_metrics: PerformanceMetrics  # 样本内（训练段）指标
-    test_metrics: PerformanceMetrics  # 样本外（测试段）指标
-    scan_train: pd.DataFrame  # 训练段参数扫描明细
-    train_range: tuple  # (起, 止)
-    test_range: tuple  # (起, 止)；测试段为空时为 (None, None)
+    best_params: dict = field(default_factory=dict)  # 训练段择优参数
+    train_metrics: PerformanceMetrics = field(default_factory=PerformanceMetrics)  # 样本内指标
+    test_metrics: PerformanceMetrics = field(default_factory=PerformanceMetrics)  # 样本外指标
+    scan_train: pd.DataFrame = field(default_factory=pd.DataFrame)  # 训练段参数扫描明细
+    train_range: tuple = (None, None)  # (起, 止)
+    test_range: tuple = (None, None)  # (起, 止)；测试段为空时为 (None, None)
+    skipped: bool = False  # 训练段为空 → 整体跳过样本外验证
 
 
 def expand_grid(grid: dict) -> list[dict]:
@@ -71,12 +74,20 @@ def split_segments(
     """按日期切分训练段 / 测试段。
 
     - ``split_date`` 优先：``date <= split_date`` 归训练段、``date > split_date`` 归测试段。
+    - ``split_date`` 为空串 / 无法解析（NaT）时视为「未提供」，回退 ``ratio`` 路径。
     - 未给 ``split_date``：按 ``ratio`` 比例切分（前 ``ratio`` 归训练段）。
     """
     data = df.copy()
     data["date"] = pd.to_datetime(data["date"])
-    if split_date is not None:
-        cut = pd.to_datetime(split_date)
+
+    cut = None
+    if split_date is not None and str(split_date).strip() != "":
+        cut = pd.to_datetime(split_date, errors="coerce")
+        if pd.isna(cut):  # 空串已排除；此处兜底非法日期字符串
+            log.warning("split_date=%r 不是有效日期，回退按 ratio=%.2f 切分", split_date, ratio)
+            cut = None
+
+    if cut is not None:
         train = data[data["date"] <= cut]
         test = data[data["date"] > cut]
     else:
@@ -176,11 +187,14 @@ def run_oos(
 ) -> OOSResult:
     """完整样本外流程：切分 → 训练段择优 → 测试段检验 → 汇总。
 
-    若测试段为空（数据太短），仅打 WARN 日志并返回空的 test_metrics，不抛异常。
+    - 训练段为空（如 ``split_date`` 早于数据起点）：打 WARN 并返回 ``skipped=True`` 的
+      空结果，**不抛异常**，让一键运行正常结束。
+    - 测试段为空（数据太短）：打 WARN，``test_metrics`` 记为空，其余照常返回。
     """
     train_df, test_df = split_segments(df, split_date, ratio)
     if len(train_df) == 0:
-        raise ValueError("训练段为空：请调小 split_date 或增大 ratio / 提供更长数据")
+        log.warning("训练段为空（split_date=%r 早于数据起点？），跳过样本外验证", split_date)
+        return OOSResult(skipped=True)
 
     best_params, scan_train = select_best_params(
         train_df, strategy_cls, grid, broker_factory, portfolio_factory, position_size, metric

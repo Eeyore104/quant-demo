@@ -95,3 +95,40 @@ def test_run_oos_empty_test_segment_is_safe():
     )
     assert oos.test_range == (None, None)
     assert oos.test_metrics.total_return == 0.0
+
+
+def test_empty_train_segment_is_skipped_not_crash():
+    """split_date 早于数据起点 → 训练段为空 → 返回 skipped=True，不抛异常。"""
+    df = _make_df(20)
+    oos = run_oos(
+        df,
+        DualMAStrategy,
+        GRID,
+        _broker_factory,
+        _portfolio_factory,
+        position_size=1,
+        split_date="2020-01-01",
+    )
+    assert oos.skipped is True
+    assert oos.best_params == {}
+    assert oos.scan_train.empty
+
+
+def test_empty_string_split_date_falls_back_to_ratio():
+    """空串 split_date 视为「未提供」→ 回退 ratio 正常切分并出结果。"""
+    df = _make_df(40)
+    train, test = split_segments(df, split_date="", ratio=0.7)
+    assert len(train) == 28 and len(test) == 12
+
+    oos = run_oos(
+        df,
+        DualMAStrategy,
+        GRID,
+        _broker_factory,
+        _portfolio_factory,
+        position_size=1,
+        split_date="",
+        ratio=0.7,
+    )
+    assert oos.skipped is False
+    assert not oos.scan_train.empty

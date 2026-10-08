@@ -111,7 +111,10 @@ def main() -> None:
                 ratio=oos_cfg.get("ratio", 0.7),
                 metric=oos_cfg.get("metric", "sharpe"),
             )
-            extra_sections.append(build_oos_table(oos))
+            if oos.skipped:
+                log.warning("样本外验证已跳过（训练段为空，请检查 backtest.oos.split_date）")
+            else:
+                extra_sections.append(build_oos_table(oos))
         else:
             log.warning("样本外验证跳过：config.strategy.grid 缺少 %s 的网格", name)
 
