@@ -33,6 +33,11 @@ backtest:
   slippage_ticks: 1             # 滑点（跳数）
   tick_size: 1.0                # 最小变动价位（玉米 1 元/吨）
   contract_multiplier: 10       # 合约乘数（玉米 10 吨/手）
+  oos:                          # 样本外验证（训练段择优 → 测试段检验）
+    enabled: true               # 是否在报告末尾追加样本外验证
+    split_date: "2024-10-01"    # 训练段 <= 该日 < 测试段（优先）
+    ratio: 0.7                  # 未指定 split_date 时按比例切分
+    metric: "sharpe"            # 训练段择优指标（sharpe/total_return/max_drawdown）
 
 output:
   figure_dir: "output/figures"  # 图表输出目录

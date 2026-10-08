@@ -10,9 +10,10 @@ from src.data import cleaner, loader, store
 from src.engine.broker import Broker
 from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
+from src.engine.walkforward import run_oos
 from src.report import metrics as metrics_mod
 from src.report.plotter import plot_equity, plot_signals
-from src.report.report import build_report_text, save_report
+from src.report.report import build_oos_table, build_report_text, save_report
 from src.strategy.registry import get_strategy
 from src.utils.config_loader import load_config, resolve_path
 from src.utils.logger import get_logger
@@ -56,16 +57,24 @@ def main() -> None:
     strategy = get_strategy(name)(params)
     log.info("策略: %s %s | 初始资金: %.0f 元", name, params, b["initial_capital"])
 
-    # ③ 回测
-    broker = Broker(
-        commission_per_lot=b["commission_per_lot"],
-        slippage_ticks=b["slippage_ticks"],
-        tick_size=b["tick_size"],
-        contract_multiplier=b["contract_multiplier"],
-    )
-    portfolio = Portfolio(b["initial_capital"], contract_multiplier=b["contract_multiplier"])
+    # ③ 回测（工厂函数创建全新实例，供主回测与样本外各自复用）
+    def make_broker() -> Broker:
+        return Broker(
+            commission_per_lot=b["commission_per_lot"],
+            slippage_ticks=b["slippage_ticks"],
+            tick_size=b["tick_size"],
+            contract_multiplier=b["contract_multiplier"],
+        )
+
+    def make_portfolio() -> Portfolio:
+        return Portfolio(b["initial_capital"], contract_multiplier=b["contract_multiplier"])
+
     engine = BacktestEngine(
-        df, strategy, broker=broker, portfolio=portfolio, position_size=b["position_size"]
+        df,
+        strategy,
+        broker=make_broker(),
+        portfolio=make_portfolio(),
+        position_size=b["position_size"],
     )
     equity_df, trades = engine.run()
 
@@ -81,8 +90,29 @@ def main() -> None:
         f"初始资金   : {b['initial_capital']:.0f} 元 / 固定 {b['position_size']} 手",
         f"成本设定   : 手续费 {b['commission_per_lot']} 元/手，滑点 {b['slippage_ticks']} 跳",
     ]
+    # ④.1 样本外验证（旁路增强：engine.run() 零改动，仅在上层编排）
+    extra_sections: list[str] = []
+    oos_cfg = b.get("oos", {})
+    if oos_cfg.get("enabled", False):
+        grid = s.get("grid", {}).get(name, {})
+        if grid:
+            oos = run_oos(
+                df,
+                get_strategy(name),
+                grid,
+                broker_factory=make_broker,
+                portfolio_factory=make_portfolio,
+                position_size=b["position_size"],
+                split_date=oos_cfg.get("split_date"),
+                ratio=oos_cfg.get("ratio", 0.7),
+                metric=oos_cfg.get("metric", "sharpe"),
+            )
+            extra_sections.append(build_oos_table(oos))
+        else:
+            log.warning("样本外验证跳过：config.strategy.grid 缺少 %s 的网格", name)
+
     figures = {"权益曲线图": eq_png, "买卖点图": sig_png}
-    text = build_report_text(m, header, figures)
+    text = build_report_text(m, header, figures, extra_sections=extra_sections)
     report_path = save_report(text, resolve_path(f"{out['report_dir']}/backtest_report.txt"))
 
     print()
