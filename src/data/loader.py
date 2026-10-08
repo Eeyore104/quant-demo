@@ -4,6 +4,7 @@ import akshare as ak
 import pandas as pd
 
 from ..utils.logger import get_logger
+from .symbols import normalize_symbol
 
 log = get_logger("data.loader")
 
@@ -25,7 +26,13 @@ def fetch_daily(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     """拉取主力连续日线（akshare 的 futures_main_sina）。
 
     start_date / end_date 支持 "2021-10-01" 或 "20211001" 两种写法。
+    品种代码结尾的字母 O（零/O 混淆）会自动纠正为数字 0。
     """
+    fixed = normalize_symbol(symbol)
+    if fixed != symbol:
+        log.warning("品种代码 %r 结尾是字母 O（应为数字 0），已自动纠正为 %r", symbol, fixed)
+        symbol = fixed
+
     start = start_date.replace("-", "")
     end = end_date.replace("-", "")
     log.info("akshare 拉取 %s 日线：%s ~ %s", symbol, start, end)
@@ -35,6 +42,12 @@ def fetch_daily(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     except TypeError:
         # 兼容旧版接口签名（不接受日期参数）
         raw = ak.futures_main_sina(symbol=symbol)
+    except ValueError as exc:
+        raise ValueError(
+            f"品种代码 {symbol!r} 拉取失败（代码无效？）。"
+            f"请先运行 uv run python scripts/list_symbols.py 查看可用清单；"
+            f"主力连续代码 = 字母 + 数字 0（如 V0 / RB0 / M0）"
+        ) from exc
 
     df = raw.rename(columns=_COLUMNS)
     missing = [c for c in ("date", "open", "high", "low", "close", "volume") if c not in df.columns]

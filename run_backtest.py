@@ -7,7 +7,7 @@
 import pandas as pd
 
 from src.data import cleaner, loader, store
-from src.data.symbols import instrument_label
+from src.data.symbols import instrument_label, normalize_symbol
 from src.engine.broker import Broker
 from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
@@ -47,6 +47,10 @@ def main() -> None:
     log = get_logger("main")
     cfg = load_config()
     d, s, b, out = cfg["data"], cfg["strategy"], cfg["backtest"], cfg["output"]
+    raw_symbol = d["symbol"]
+    d["symbol"] = normalize_symbol(raw_symbol)
+    if d["symbol"] != raw_symbol:
+        log.warning("config 品种代码 %r 结尾是字母 O，已自动按 %r 处理", raw_symbol, d["symbol"])
     label = instrument_label(d["symbol"])
 
     # ① 数据

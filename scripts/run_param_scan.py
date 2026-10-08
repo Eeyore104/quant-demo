@@ -19,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd
 
 from src.data import store
-from src.data.symbols import instrument_label
+from src.data.symbols import instrument_label, normalize_symbol
 from src.engine.broker import Broker
 from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
@@ -50,6 +50,10 @@ def main() -> None:
     log = get_logger("param_scan")
     cfg = load_config()
     d, b, s = cfg["data"], cfg["backtest"], cfg["strategy"]
+    raw_symbol = d["symbol"]
+    d["symbol"] = normalize_symbol(raw_symbol)
+    if d["symbol"] != raw_symbol:
+        log.warning("config 品种代码 %r 结尾是字母 O，已自动按 %r 处理", raw_symbol, d["symbol"])
 
     # 策略名：命令行优先，否则取 config.strategy.name
     name = sys.argv[1] if len(sys.argv) > 1 else s["name"]

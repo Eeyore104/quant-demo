@@ -109,3 +109,13 @@ def instrument_label(symbol: str) -> str:
     if len(symbol) > 1 and symbol.endswith("0") and symbol[:-1].isalpha():
         return f"{core}（主力连续）"
     return core
+
+
+def normalize_symbol(symbol: str) -> str:
+    """规范主力连续代码：结尾的字母 ``O`` 是常见笔误，自动纠正为数字 ``0``。
+
+    如 ``"VO"`` → ``"V0"``、``"RBO"`` → ``"RB0"``；其余情况原样返回。
+    """
+    if len(symbol) > 1 and symbol.endswith("O") and symbol[:-1].isalpha():
+        return symbol[:-1] + "0"
+    return symbol
