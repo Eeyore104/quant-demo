@@ -1,7 +1,34 @@
-# quant-demo：个人量化交易 Demo（期货回测最小闭环）
+# quant-demo · 个人量化交易 Demo（期货回测最小闭环）
 
-> 一个结构清晰、可一键运行、能产出专业回测报告的个人期货量化研究项目。
+![Python](https://img.shields.io/badge/Python-3.12-3776AB)
+![Tests](https://img.shields.io/badge/tests-6%20passed-brightgreen)
+![Market](https://img.shields.io/badge/market-China%20Futures-C8102E)
+![Status](https://img.shields.io/badge/status-MVP%20done-success)
+
+> 一个结构清晰、可一键运行、能产出专业回测报告的**个人期货量化研究项目**。
+>
 > 第一阶段目标：**回测最小闭环** —— 数据获取 → 清洗 → 策略 → 回测（含手续费/滑点）→ 绩效报告 → 参数对比。
+>
+> *A minimal, reproducible backtesting framework for China futures markets.*
+
+---
+
+## 项目截图
+
+| 权益曲线 | 价格与买卖点 |
+|:---:|:---:|
+| ![权益曲线](docs/images/equity.png) | ![买卖点](docs/images/signals.png) |
+
+## 回测样例（可复现）
+
+**玉米 C0 · 近 5 年日线（1211 根）· 双均线 fast=5 / slow=20 · 已计入手续费与滑点**
+
+| 累计收益 | 年化 | 最大回撤 | 夏普 | 胜率 | 盈亏比 | 交易次数 | 累计手续费 | 累计滑点 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| -0.46% | -0.10% | -5.45% | -0.02 | 35.8% | 0.97 | 67 | 162 元 | 1350 元 |
+
+> 📌 这是一份**诚实**的样例：短周期均线在计入交易成本后并不赚钱（参数扫描中 fast=5 / slow=60 组合为 **+7.05%**，夏普 0.54）。
+> 本项目的价值不是"暴利曲线"，而是**一套可复现、成本透明、可扩展**的量化研究框架。
 
 ---
 
@@ -11,39 +38,38 @@
 # 1. 安装 uv（若已安装可跳过）
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-# 2. 进入项目目录
-cd C:\Users\eeyor\WorkBuddy\demo\quant-demo
+# 2. 克隆项目
+git clone https://github.com/Eeyore104/quant-demo.git
+cd quant-demo
 
 # 3. 安装依赖（自动创建虚拟环境，锁定 Python 3.12）
 uv sync
 
-# 4. 一键跑通回测（首次运行联网拉数据，之后走本地缓存）
+# 4. 一键跑通回测（首次联网拉数据，之后走本地缓存）
 uv run python run_backtest.py
 ```
 
-> 若提示 "uv 不是命令"：重开一个终端，或改用完整路径 `%USERPROFILE%\.local\bin\uv.exe`。
+跑完在 `output/` 下得到：权益曲线图、买卖点图、绩效报告（≥5 项指标 + 成本明细）。
 
-跑完在 `output/` 下得到：
-
-| 产物 | 说明 |
-|---|---|
-| `output/figures/equity.png` | 权益曲线图 |
-| `output/figures/signals.png` | 价格与买卖点标注图 |
-| `output/reports/backtest_report.txt` | 绩效报告（≥5 项指标 + 成本明细） |
-
-参数对比（需先跑过一次上面的回测）：
+参数对比 / 单元测试：
 
 ```powershell
-uv run python scripts/run_param_scan.py
+uv run python scripts/run_param_scan.py   # 参数扫描 → 参数-绩效对比表
+uv run pytest                             # 单元测试
 ```
 
-运行单元测试：
-
-```powershell
-uv run pytest
-```
+> 若提示 "uv 不是命令"：重开一个终端，或使用完整路径 `%USERPROFILE%\.local\bin\uv.exe`。
 
 ---
+
+## 功能特性
+
+- **数据层**：akshare 免费拉取期货日线；CSV 本地缓存（二次运行不联网）；自动清洗（去重 / 去无效 bar）
+- **策略层**：统一策略接口 `StrategyBase` + 双均线 / 布林带两个示例策略，新增策略只需实现一个方法
+- **引擎层**：自研轻量事件驱动回测引擎 —— T 日收盘出信号、T+1 开盘价 ± 滑点成交（**防未来函数**），内置手续费 / 滑点
+- **报告层**：10 项绩效指标 + 权益曲线 / 买卖点图（PNG）+ 参数扫描对比表
+- **预留执行层**：`ExecutionAdapter` 抽象接口 —— 未来接 SimNow 仿真 / CTP 实盘时，**策略代码不改**
+- **工程化**：uv 依赖管理 · pytest 单元测试 · `config.yaml` 配置驱动（改参数不碰代码）
 
 ## 目录结构
 
@@ -60,6 +86,7 @@ quant-demo/
 ├── scripts/run_param_scan.py   # 参数扫描入口
 ├── run_backtest.py             # ★ 一键入口
 ├── tests/                      # 单元测试
+├── docs/                       # 项目文档（背景 / PRD / 系统设计）
 ├── data/                       # 数据缓存（gitignore）
 └── output/                     # 报告与图表（gitignore）
 ```
@@ -76,8 +103,6 @@ quant-demo/
 | 调参数 | `strategy.params` | 双均线 `fast: 5, slow: 20` |
 | 调成本 | `backtest.commission_per_lot` / `slippage_ticks` | 手续费 1.2 元/手、滑点 1 跳 |
 
----
-
 ## 设计要点（为什么这么做）
 
 - **成交约定（防未来函数）**：T 日收盘产生信号，T+1 日开盘价 ± 滑点成交
@@ -86,6 +111,12 @@ quant-demo/
 - **数据可离线复用**：`data/raw/` 缓存原始数据、`data/clean/` 缓存清洗结果，
   二次运行不重复联网
 - **成本必计入**：报告明确打印累计手续费与累计滑点，回测结论不虚高
+
+## Roadmap
+
+- [x] **M1–M5 回测最小闭环**（作品集级）：数据 → 策略 → 回测 → 报告 → 参数对比
+- [ ] **M6–M7 研究平台化 + 仿真**：多策略框架、本地数据库、SimNow 模拟盘接入
+- [ ] **M8–M9 Web 看板 + 实盘准备**：可视化看板、风控模块、程序化交易报备后小资金实盘
 
 ## 合规提示（重要）
 
