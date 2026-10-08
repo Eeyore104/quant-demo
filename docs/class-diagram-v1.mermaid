@@ -1,0 +1,65 @@
+%% v1.0 增量类图（仅标注新增/变更部分）
+classDiagram
+    class StrategyBase {
+        <<abstract>>
+        +name: str
+        +generate_signals(df) DataFrame
+        +on_bar(ctx) int
+    }
+
+    class DualMAStrategy
+    class BollingerStrategy
+    class DonchianStrategy {
+        +window: int
+        +generate_signals(df) DataFrame
+    }
+
+    class StrategyRegistry {
+        <<module>> registry.py
+        +STRATEGIES: dict
+        +discover() dict
+        +get_strategy(name) type
+    }
+
+    class BacktestEngine {
+        +run() tuple
+    }
+
+    class WalkForward {
+        <<module>> walkforward.py
+        +split_segments(df, split_date, ratio) tuple
+        +run_segment(df, strategy, broker, portfolio, size) tuple
+        +select_best_params(...) tuple
+        +run_oos(...) OOSResult
+    }
+
+    class OOSResult {
+        +best_params: dict
+        +train_metrics: PerformanceMetrics
+        +test_metrics: PerformanceMetrics
+        +scan_train: DataFrame
+        +train_range: tuple
+        +test_range: tuple
+    }
+
+    class ReportBuilder {
+        +build_report_text(...) str
+        +build_oos_table(oos) str
+    }
+
+    class ChartPlotter {
+        +plot_equity(...) str
+        +plot_signals(...) str
+        +plot_drawdown(equity_df, path) str
+        +plot_monthly_heatmap(equity_df, path) str
+        +plot_param_heatmap(scan_df, path) str
+    }
+
+    StrategyBase <|-- DualMAStrategy
+    StrategyBase <|-- BollingerStrategy
+    StrategyBase <|-- DonchianStrategy
+    StrategyRegistry ..> StrategyBase : discovers subclasses
+    WalkForward ..> BacktestEngine : reuses (unchanged)
+    WalkForward ..> StrategyRegistry : get_strategy()
+    WalkForward ..> OOSResult : produces
+    ReportBuilder ..> OOSResult : renders

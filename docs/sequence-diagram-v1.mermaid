@@ -1,0 +1,64 @@
+%% v1.0 增量时序图 1：策略自动发现（启动时）
+sequenceDiagram
+    autonumber
+    participant U as run_backtest.py
+    participant R as strategy.registry
+    participant P as pkgutil
+    participant SB as StrategyBase
+
+    U->>R: import STRATEGIES / get_strategy
+    R->>P: iter_modules(src/strategy/)
+    P-->>R: [dual_ma, bollinger, donchian, registry, base]
+    loop 每个模块（跳过 base/registry）
+        R->>R: importlib.import_module
+        R->>SB: issubclass() 判定 + 取 .name
+        R->>R: reg[name] = cls
+    end
+    R-->>U: {"dual_ma","bollinger","donchian"}
+    U->>R: get_strategy(config.strategy.name)
+    R-->>U: 策略类 → 实例化
+
+%% v1.0 增量时序图 2：样本外验证（run_backtest 末尾，config 开关）
+sequenceDiagram
+    autonumber
+    participant U as run_backtest.py
+    participant WF as walkforward
+    participant E as BacktestEngine
+    participant PA as PerformanceAnalyzer
+    participant RG as report
+
+    U->>WF: run_oos(df, strategy_cls, grid, factories, split_date, metric)
+    WF->>WF: split_segments(df, split_date, ratio)
+    Note over WF: train_df / test_df
+    loop 训练段参数网格
+        WF->>E: BacktestEngine(train_df, cls(p)).run()
+        E-->>WF: equity, trades
+        WF->>PA: analyze(...)
+        PA-->>WF: metrics（训练段）
+    end
+    WF->>WF: select_best_params(按 sharpe 择优)
+    WF->>E: BacktestEngine(test_df, cls(best)).run()
+    E-->>WF: equity, trades
+    WF->>PA: analyze(...)
+    PA-->>WF: test_metrics（样本外）
+    WF-->>U: OOSResult
+    U->>RG: build_oos_table(OOSResult)
+    RG-->>U: 训练段/测试段对比表（追加到报告）
+
+%% v1.0 增量时序图 3：CI 流程
+sequenceDiagram
+    autonumber
+    participant Dev as git push
+    participant GA as GitHub Actions
+    participant SUV as setup-uv
+    participant UV as uv
+    participant PYT as pytest / ruff
+
+    Dev->>GA: push (main / PR)
+    GA->>SUV: 安装 uv
+    GA->>UV: uv python install 3.12
+    GA->>UV: uv sync --frozen
+    UV-->>GA: 依赖就绪（严格按 uv.lock）
+    GA->>PYT: uv run ruff check .
+    GA->>PYT: uv run pytest -q
+    PYT-->>GA: 6+N/6+N 通过 → 徽章 passing
