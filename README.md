@@ -2,9 +2,9 @@
 
 ![CI](https://github.com/Eeyore104/quant-demo/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
-![Tests](https://img.shields.io/badge/tests-6%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-39%20passed-brightgreen)
 ![Market](https://img.shields.io/badge/market-China%20Futures-C8102E)
-![Status](https://img.shields.io/badge/status-v1.0%20done-success)
+![Status](https://img.shields.io/badge/status-v1.1%20done-success)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 > 一个结构清晰、可一键运行、能产出专业回测报告的**个人期货量化研究项目**。
@@ -59,7 +59,7 @@ uv sync
 uv run python run_backtest.py
 ```
 
-跑完在 `output/` 下得到：权益曲线图、买卖点图、回撤区间图、月度收益热力图、绩效报告（含成本明细与**样本外验证对比表**）。
+跑完在 `output/` 下得到：权益曲线图、买卖点图、回撤区间图、月度收益热力图、参数邻域热力图、蒙特卡洛对照图、成本敏感性图，以及绩效报告（含成本明细、**样本外验证对比表**与**过拟合体检**）。
 
 参数对比 / 单元测试：
 
@@ -77,7 +77,7 @@ uv run pytest                             # 单元测试
 - **数据层**：akshare 免费拉取期货日线；CSV 本地缓存（二次运行不联网）；自动清洗（去重 / 去无效 bar）
 - **策略层**：统一策略接口 `StrategyBase` + **策略自动注册表**——新增策略只需在 `src/strategy/` 放一个新文件（内置双均线 / 布林带 / 唐奇安通道三个示例），引擎与入口**零改动**
 - **引擎层**：自研轻量事件驱动回测引擎 —— T 日收盘出信号、T+1 开盘价 ± 滑点成交（**防未来函数**），内置手续费 / 滑点
-- **研究严谨**：内置**样本外验证**（训练段参数择优 → 测试段检验），报告输出"样本内 / 样本外"对比表，主动暴露过拟合
+- **研究严谨**：内置**样本外验证**（训练段参数择优 → 测试段检验）+ **过拟合体检（v1.1）**——参数邻域细检（悬崖 / 孤峰）、蒙特卡洛对照（信号重排 + Bootstrap）、成本敏感性（收益归零倍数）、Deflated Sharpe 校正、样本外使用次数登记；报告输出逐项判定（通过 / 存疑 / 不通过）与总判定，主动暴露过拟合
 - **报告层**：10 项绩效指标 + 权益曲线 / 买卖点 / 回撤区间 / 月度收益热力图 / 参数扫描热力图（PNG）+ 参数扫描对比表
 - **预留执行层**：`ExecutionAdapter` 抽象接口 —— 未来接 SimNow 仿真 / CTP 实盘时，**策略代码不改**
 - **工程化**：uv 依赖管理 · ruff 代码规范 · pytest 单元测试 · GitHub Actions CI · `config.yaml` 配置驱动（改参数不碰代码）
@@ -131,6 +131,7 @@ quant-demo/
 
 - [x] **M1–M5 回测最小闭环**（作品集级）：数据 → 策略 → 回测 → 报告 → 参数对比
 - [x] **v1.0 交付级完善**：CI / License / 代码规范 / 样本外验证 / 参数扫描热力图 / 唐奇安策略（多策略自动注册）
+- [x] **v1.1 研究体检补全**：过拟合四件套（参数邻域 / 蒙特卡洛 / 成本敏感性）+ Deflated Sharpe 校正 + 样本外使用次数登记
 - [ ] **M6–M7 研究平台化 + 仿真**：本地数据库、SimNow 模拟盘接入
 - [ ] **M8–M9 Web 看板 + 实盘准备**：可视化看板、风控模块、程序化交易报备后小资金实盘
 
