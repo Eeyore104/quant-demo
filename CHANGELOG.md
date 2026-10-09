@@ -6,14 +6,24 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-09
+
 ### Added
+- **过拟合体检（v1.1 · 四件套 + DSR）**：新增 `src/analysis/` —— ① 参数邻域细检（悬崖式衰减 / 孤峰检测、稳健区域占比）；② 蒙特卡洛对照（信号随机重排 × N 次 + 收益 Bootstrap 分布）；③ 成本敏感性（×1.5/×2/×3 → 收益归零倍数）；④ Deflated Sharpe 多重试验校正（Bailey & López de Prado）。
+- 回测报告新增「过拟合体检」章节（逐项判定 通过/存疑/不通过 + 总判定）与 3 张新图表（参数邻域热力图 / 蒙特卡洛分布 / 成本敏感性）；`config.yaml` 新增 `health_check` 配置段（开关 / 次数 / 判定阈值全部可调）。
+- **样本外使用次数登记**（`src/analysis/oos_usage.py`）：同一「品种 | 策略 | 分段」反复使用样本外时累计计数，超过 3 次自动将体检中的样本外结论降级为「存疑」。
+- 统计函数全部自研（`stats_utils.py`：正态 CDF / 分位函数 / 偏度 / 峰度），**未新增任何第三方依赖**。
 - 全部输出标注品种（如「玉米 C0（主力连续）」）：绩效报告头、样本外对比表、5 张图表标题、参数扫描控制台与 CSV（新增 `symbol` 列）。
 - 新增 `scripts/list_symbols.py`：一键列出全部可回测品种（83 个主力连续合约）；品种中文名映射补齐至全覆盖。
 
 ### Fixed
+- 体检报告悬崖描述：整数参数不再显示小数点（`4.0 → 5.0` 修复为 `4 → 5`），并补充对应单测断言。
 - 样本外验证边界兜底：训练段为空（如 `split_date` 早于数据起点）时改为 WARN 并跳过，不再抛异常崩溃；空串 `split_date` 视为未提供，回退按 `ratio` 切分。
 - 修复 `walkforward` 日志重复打印：复用 `engine` logger，避免子 logger 向父 logger 冒泡导致每条日志打两遍。
 - 品种代码防呆：结尾字母 `O`（零/O 混淆笔误）自动纠正为数字 `0` 并告警；无效代码的报错信息会指向品种清单脚本。
+
+### Changed
+- `pyproject.toml` 版本号 `1.0.0` → `1.1.0`；回测一键运行现在额外输出体检章节（可用 `health_check.enabled` 关闭）。
 
 ## [1.0.0] - 2026-10-08
 
@@ -38,6 +48,7 @@
 - 报告层：绩效指标（收益 / 回撤 / 夏普 / 胜率 / 盈亏比 / 成本）+ 权益曲线 / 买卖点图 + 参数扫描对比表。
 - 工程化：`uv` 依赖管理、`pytest` 单元测试、`config.yaml` 配置驱动。
 
-[Unreleased]: https://github.com/Eeyore104/quant-demo/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Eeyore104/quant-demo/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Eeyore104/quant-demo/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Eeyore104/quant-demo/releases/tag/v1.0.0
 [0.1.0]: https://github.com/Eeyore104/quant-demo/releases/tag/v0.1.0

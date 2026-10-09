@@ -42,3 +42,27 @@ backtest:
 output:
   figure_dir: "output/figures"  # 图表输出目录
   report_dir: "output/reports"  # 报告输出目录
+
+health_check:                   # v1.1 过拟合体检（研究严谨性）：四件套 + DSR
+  enabled: true                 # 是否在回测报告中追加「过拟合体检」章节
+  monte_carlo:
+    enabled: true
+    runs: 150                   # 信号随机重排对照次数（越多越稳、越慢）
+    bootstrap_runs: 500         # 收益 Bootstrap 路径数（纯 numpy，较快）
+    seed: 42                    # 随机种子（保证结果可复现）
+  param_neighborhood:
+    enabled: true               # 参数邻域细检（围绕当前参数：±档位、悬崖、稳健占比）
+  cost_sensitivity:
+    enabled: true
+    multipliers: [1.5, 2.0, 3.0]  # 成本放大档位（×1 基准自动包含）
+  deflated_sharpe:
+    enabled: true               # 试验次数取自 strategy.grid（网格组合数）
+  thresholds:                   # 判定阈值（报告「过拟合体检」章节按此定级）
+    mc_good_percentile: 90      # 蒙特卡洛分位 ≥ 90 → 通过
+    mc_warn_percentile: 70      # ≥ 70 → 存疑；否则 不通过
+    cost_good_multiplier: 3.0   # 收益归零成本倍数 ≥ 3.0 → 通过
+    cost_warn_multiplier: 1.5   # ≥ 1.5 → 存疑；否则 不通过
+    dsr_good: 0.95              # Deflated Sharpe ≥ 0.95 → 通过
+    dsr_warn: 0.90              # ≥ 0.90 → 存疑；否则 不通过
+    stable_fraction_warn: 0.6   # 邻域稳健占比 < 0.6 → 存疑
+    oos_usage_warn: 3           # 样本外使用次数 > 3 → 样本外结论降级为存疑

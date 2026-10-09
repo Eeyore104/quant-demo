@@ -218,3 +218,132 @@ def plot_param_heatmap(scan_df, out_path, metric: str = "sharpe", label: str = "
     fig.savefig(p, dpi=120)
     plt.close(fig)
     return str(p)
+
+
+def plot_health_neighborhood(
+    scan_df, focus: dict, out_path, metric: str = "total_return", label: str = ""
+) -> str:
+    """参数邻域热力图：★ 标记当前参数位置（收益为百分比口径，红=涨绿=跌）。"""
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    param_cols = [c for c in scan_df.columns if c not in _METRIC_COLS and c != "symbol"]
+    if not param_cols:
+        return ""
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    if len(param_cols) >= 2:
+        x_key, y_key = param_cols[0], param_cols[1]
+        pivot = scan_df.pivot_table(index=y_key, columns=x_key, values=metric)
+        values = pivot.to_numpy(dtype=float) * 100.0
+        abs_vals = np.abs(values)
+        vmax = float(np.nanmax(abs_vals)) if np.isfinite(abs_vals).any() else 1.0
+        vmax = max(vmax, 1e-6)
+        im = ax.imshow(values, cmap="RdYlGn", vmin=-vmax, vmax=vmax, aspect="auto")
+        ax.set_xticks(range(pivot.shape[1]))
+        ax.set_xticklabels([str(v) for v in pivot.columns])
+        ax.set_yticks(range(pivot.shape[0]))
+        ax.set_yticklabels([str(v) for v in pivot.index])
+        ax.set_xlabel(x_key)
+        ax.set_ylabel(y_key)
+        for i in range(values.shape[0]):
+            for j in range(values.shape[1]):
+                if np.isfinite(values[i, j]):
+                    ax.text(j, i, f"{values[i, j]:.1f}", ha="center", va="center", fontsize=8)
+        fx, fy = focus.get(x_key), focus.get(y_key)
+        cols, rows = list(pivot.columns), list(pivot.index)
+        if fx in cols and fy in rows:
+            ax.scatter(
+                [cols.index(fx)],
+                [rows.index(fy)],
+                marker="*",
+                s=260,
+                color="#1a237e",
+                edgecolor="white",
+                zorder=5,
+                label="当前参数",
+            )
+            ax.legend(loc="upper right", fontsize=8)
+        fig.colorbar(im, ax=ax, label=f"{metric}（%）", fraction=0.04, pad=0.02)
+        ax.set_title(_titled(label, f"参数邻域热力图（{metric}，★=当前参数）"))
+    else:
+        key = param_cols[0]
+        data = scan_df.sort_values(key)
+        vals = data[metric].to_numpy(dtype=float) * 100.0
+        center = focus.get(key)
+        colors = ["#c62828" if str(v) == str(center) else "#90a4ae" for v in data[key]]
+        ax.bar([str(v) for v in data[key]], vals, color=colors)
+        ax.axhline(0, color="#9e9e9e", linewidth=0.8)
+        ax.set_xlabel(key)
+        ax.set_ylabel(f"{metric}（%）")
+        ax.set_title(_titled(label, f"参数邻域（{metric}，红色=当前参数）"))
+        ax.grid(alpha=0.3, axis="y")
+
+    fig.tight_layout()
+    fig.savefig(p, dpi=120)
+    plt.close(fig)
+    return str(p)
+
+
+def plot_health_monte_carlo(mc, out_path, label: str = "") -> str:
+    """蒙特卡洛（信号重排）分布直方图：红色虚线 = 实际策略收益。"""
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    vals = mc.returns.astype(float) * 100.0
+    bins = min(30, max(10, mc.runs // 5))
+    ax.hist(vals, bins=bins, color="#90a4ae", edgecolor="white", alpha=0.9)
+    ax.axvline(0, color="#9e9e9e", linewidth=0.8)
+    ax.axvline(mc.actual_return * 100.0, color="#c62828", linewidth=1.8, linestyle="--")
+    ax.text(
+        0.98,
+        0.95,
+        f"实际收益 {mc.actual_return * 100:.2f}%\n优于 {mc.percentile:.0f}% 的随机对照",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        color="#c62828",
+        fontsize=10,
+    )
+    ax.set_xlabel("累计收益（%）")
+    ax.set_ylabel("频数")
+    ax.set_title(_titled(label, f"蒙特卡洛对照 · 信号重排 {mc.runs} 次"))
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(p, dpi=120)
+    plt.close(fig)
+    return str(p)
+
+
+def plot_health_cost(cs, out_path, label: str = "") -> str:
+    """成本敏感性：收益 vs 成本倍数，标注收益归零点。"""
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    x = [float(r["multiplier"]) for r in cs.rows]
+    y = [float(r["total_return"]) * 100.0 for r in cs.rows]
+    ax.plot(x, y, marker="o", color="#1976d2", linewidth=1.5)
+    ax.axhline(0, color="#9e9e9e", linewidth=0.8)
+    if cs.zero_multiplier is not None:
+        z = cs.zero_multiplier
+        ax.axvline(z, color="#c62828", linestyle="--", linewidth=1.2)
+        ax.annotate(
+            f"归零 ≈ ×{z:.2f}",
+            xy=(z, 0),
+            xytext=(8, 10),
+            textcoords="offset points",
+            color="#c62828",
+            fontsize=10,
+        )
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"×{v:g}" for v in x])
+    ax.set_xlabel("成本倍数（手续费 / 滑点等比放大）")
+    ax.set_ylabel("累计收益（%）")
+    ax.set_title(_titled(label, "成本敏感性 · 收益归零倍数"))
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(p, dpi=120)
+    plt.close(fig)
+    return str(p)

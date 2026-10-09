@@ -1,6 +1,6 @@
 [project]
 name = "quant-demo"
-version = "1.0.0"
+version = "1.1.0"
 description = "个人量化交易 Demo：期货回测最小闭环（数据 → 策略 → 回测 → 绩效报告）"
 requires-python = ">=3.12,<3.14"
 dependencies = [

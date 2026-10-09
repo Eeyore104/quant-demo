@@ -73,6 +73,26 @@ def build_oos_table(oos, label: str = "") -> str:
     )
 
 
+def build_health_table(health, label: str = "") -> str:
+    """渲染「过拟合体检」章节（四件套 + DSR 逐项判定 + 总判定）。"""
+    title = "过拟合体检（四件套 + DSR 校正）"
+    if label:
+        title = f"过拟合体检 · {label}（四件套 + DSR 校正）"
+    lines = [
+        f"============= {title} =============",
+        _pad("体检项", 16) + _pad("判定", 8) + "主要读数",
+    ]
+    for it in health.items:
+        lines.append(_pad(it.title, 16) + _pad(it.grade, 8) + it.detail)
+        if it.note:
+            lines.append("    └ " + it.note)
+    lines.append("-" * 63)
+    lines.append(f"总判定：{health.overall} —— {health.summary}")
+    lines.append("口径说明：判定阈值见 config.health_check.thresholds；总判定取各项最差。")
+    lines.append("=" * 63)
+    return "\n".join(lines)
+
+
 def build_report_text(
     m, header_lines: list[str], figure_paths: dict, extra_sections: list[str] | None = None
 ) -> str:
