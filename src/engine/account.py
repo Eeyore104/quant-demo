@@ -105,6 +105,19 @@ class PortfolioAccount:
         spec = self.contracts[symbol]
         return abs(lots) * float(price) * spec.multiplier * spec.margin_rate
 
+    def exposure_notional(self, symbol: str) -> float:
+        """某品种名义敞口 = |手数| × 最新价 × 乘数（风控敞口口径）。"""
+        st = self.states[symbol]
+        if st.size == 0 or st.last_price <= 0:
+            return 0.0
+        spec = self.contracts[symbol]
+        return abs(st.size) * st.last_price * spec.multiplier
+
+    @property
+    def total_exposure(self) -> float:
+        """组合总名义敞口（各品种之和）。"""
+        return sum(self.exposure_notional(s) for s in self.states)
+
     # ---------- 变更 ----------
 
     def mark_price(self, symbol: str, price: float) -> None:
@@ -148,8 +161,11 @@ class PortfolioAccount:
             )
         )
 
-    def record_day(self, date) -> None:
-        """逐日记录：组合权益 / 保证金 / 可用资金 + 逐品种累计盈亏（供报告与 CSV）。"""
+    def record_day(self, date, extra: dict | None = None) -> None:
+        """逐日记录：组合权益 / 保证金 / 可用资金 + 逐品种累计盈亏（供报告与 CSV）。
+
+        ``extra`` 为 v1.3 风控附加列（熔断状态 / 敞口 / 超限计数）；缺省时与 v1.2 一致。
+        """
         row: dict = {
             "date": date,
             "equity": self.equity,
@@ -160,4 +176,6 @@ class PortfolioAccount:
         }
         for s in self.states:
             row[f"pnl_{s}"] = self.symbol_pnl(s)
+        if extra:
+            row.update(extra)
         self.daily.append(row)

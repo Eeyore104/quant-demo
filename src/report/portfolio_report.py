@@ -55,8 +55,9 @@ def build_portfolio_report(
     start_date: str,
     end_date: str,
     sizing_desc: str,
+    risk_enabled: bool = False,
 ) -> str:
-    """渲染组合回测报告（文本）。"""
+    """渲染组合回测报告（文本）。``risk_enabled`` 时标注风控口径（v1.3）。"""
     eq = result.equity_df
     m = metrics_mod.analyze(eq, result.trades, initial_capital)
 
@@ -66,6 +67,11 @@ def build_portfolio_report(
     util_peak = float(util) if pd.notna(util) else 0.0
 
     pool_line = " / ".join(labels.get(s, s).split("（")[0] for s in result.symbols)
+    risk_line = (
+        "已启用（止损 / 熔断 / 敞口 / 停板 · 详见「风险与压力测试」）"
+        if risk_enabled
+        else "未启用（v1.2 口径）"
+    )
 
     lines = [
         "=================== 组合回测报告 ===================",
@@ -73,6 +79,7 @@ def build_portfolio_report(
         f"  区间       : {start_date} ~ {end_date}",
         f"  品种池     : {len(result.symbols)} 个 · {pool_line}",
         f"  头寸规模   : {sizing_desc}",
+        f"  风控体系   : {risk_line}",
         "  成交约定   : T 日收盘信号 → T+1 开盘价 ± 1 跳滑点",
         "---------------------------------------------------",
         "  【组合汇总】",
@@ -137,7 +144,11 @@ def build_portfolio_report(
         "  【口径说明】",
         "  - 保证金率 / 手续费为近似口径（2026-10-10 akshare 核对，交易所口径；实盘通常上浮）",
         "  - 保证金占用每日按收盘价重估（近似盯市口径）；可用资金 = 权益 - 保证金占用",
-        "  - 平仓永不拒绝；开仓保证金不足时整笔拒绝并记录事件",
+        (
+            "  - 平仓永不拒绝（停板除外）；开仓资金不足时按可负担手数降级执行（v1.3）"
+            if risk_enabled
+            else "  - 平仓永不拒绝；开仓保证金不足时整笔拒绝并记录事件"
+        ),
         "    （同日多品种竞争资金时，按品种池配置顺序先到先得）",
         "  - 回测使用主力连续（拼接）序列，换月点存在跳空，损益含拼接噪声（已登记为数据口径风险）",
         "  - 手续费按手、滑点 1 跳（逐品种参数化），口径与单品种回测一致",

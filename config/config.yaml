@@ -70,11 +70,14 @@ health_check:                   # v1.1 过拟合体检（研究严谨性）：�
 portfolio:                      # v1.2 组合引擎（多品种 · 共享资金池 · 保证金约束）
   initial_capital: 100000       # 共享资金池（8 手全开约占用 4 成）
   sizing:
-    mode: fixed                 # fixed | equal_weight | inv_vol
+    mode: atr_risk              # fixed | equal_weight | inv_vol | atr_risk（v1.3 默认）
     lots: 1                     # fixed：每品种目标手数
     target_margin_usage: 0.6    # equal_weight / inv_vol：保证金使用率上限
     vol_window: 60              # inv_vol：波动率窗口（交易日）
     max_lots_per_symbol: 10     # 单品种手数上限
+    risk_pct: 0.015             # atr_risk：单笔风险预算（权益 × 1.5%）
+    atr_window: 20              # atr_risk / 止损止盈：ATR 窗口（交易日）
+    # stop_atr_mult 未配置时取 risk.stops.fixed.atr_mult（保持两处口径一致）
   symbols:                      # 品种池（8 中小合约 · 4 板块 · 2026-10-10 核对）
     - { code: RB0, strategy: dual_ma, params: { fast: 5, slow: 20 } }
     - { code: I0,  strategy: dual_ma, params: { fast: 5, slow: 20 } }
@@ -93,3 +96,49 @@ portfolio:                      # v1.2 组合引擎（多品种 · 共享资金�
     MA0: { multiplier: 10,  tick_size: 1.0, margin_rate: 0.09, commission_per_lot: 3.8 }
     TA0: { multiplier: 5,   tick_size: 2.0, margin_rate: 0.07, commission_per_lot: 3.0 }
     AL0: { multiplier: 5,   tick_size: 5.0, margin_rate: 0.11, commission_per_lot: 3.0 }
+
+risk:                           # v1.3 风控体系（全部可开关；详见 docs/12）
+  enabled: true                 # 总开关：关 = 无止损/熔断/涨跌停/敞口约束（保证金机制保留）
+  reentry:                      # 止损/止盈后的重入规则
+    mode: signal_reset          # signal_reset（等信号重置）| cooldown | immediate
+    cooldown_days: 3            # cooldown 模式生效
+  execution:
+    intrabar: true              # 盘中触价（跳空按开盘价、盘中按触发价）；false = 收盘判定
+    margin_degrade: true        # 资金不足 → 按可负担手数降级；false = 整笔拒绝（v1.2 口径）
+  stops:                        # 止损止盈（ATR 倍数制）
+    fixed:       { enabled: true,  atr_mult: 2.0 }   # 固定止损：入场价 ∓ 2×ATR（入场冻结）
+    trailing:    { enabled: true,  atr_mult: 3.0 }   # 移动止损：持仓极值 ∓ 3×ATR（逐日更新）
+    take_profit: { enabled: false, pct: 0.04 }       # 止盈（趋势策略默认关）
+  fuse:                         # 组合熔断（收盘判定 → 次日生效）
+    daily_loss:    { enabled: true,  threshold: 0.03, cooldown_days: 3 }
+    drawdown:      { enabled: true,  threshold: 0.15, recovery: 0.10, degrade_factor: 0.5, max_cooldown_days: 20 }
+    losing_streak: { enabled: true,  count: 5, cooldown_days: 10 }
+    liquidate:     { enabled: false, threshold: 0.25, cooldown_days: 10 }  # 全平（最高级，默认关）
+  exposure:                     # 名义敞口上限（开仓事前检查；持仓后超限仅记录）
+    enabled: true
+    max_symbol_pct: 1.50        # 单品种名义 ≤ 权益 ×150%
+    max_total_pct: 4.00         # 组合总名义 ≤ 权益 ×400%
+  price_limit:                  # 涨跌停近似口径（无结算价，按日涨跌幅判定；可覆盖）
+    enabled: true
+    detect_factor: 0.95
+    rates: { RB0: 0.08, I0: 0.08, M0: 0.07, P0: 0.08, SR0: 0.06, MA0: 0.07, TA0: 0.06, AL0: 0.07 }
+  liquidity:                    # 成交量参与率上限
+    enabled: true
+    max_volume_share: 0.05      # 单笔下单 ≤ 当日成交量 × 5%
+  stress:                       # 压力测试（报告章节）
+    enabled: true
+    historical_top_n: 3         # 历史情景：单日/5 日跌幅 Top3 + 波动率最高 3 段
+    gap_sigmas: [2.0, 3.0]      # 假设情景：跳空冲击 −2σ / −3σ
+    limit_streak_days: 3        # 假设情景：连续 3 日跌停
+    mc_runs: 500                # 蒙特卡洛回撤分布路径数
+    seed: 42
+  metrics:                      # 风险指标
+    var_window: 250             # VaR/CVaR 历史模拟窗口（交易日）
+    confidences: [0.95, 0.99]
+    corr_window: 60             # 相关性预警窗口
+    corr_warn: 0.50             # 滚动平均相关 > 0.5 → 预警
+  sectors:                      # 板块映射（集中度口径）
+    黑色: [RB0, I0]
+    农产品: [M0, P0, SR0]
+    能化: [MA0, TA0]
+    有色: [AL0]

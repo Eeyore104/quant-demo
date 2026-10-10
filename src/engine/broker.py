@@ -61,6 +61,19 @@ class Broker:
 
         return trades
 
+    def close_at(self, bar, size: int, base_price: float) -> Trade:
+        """按给定基准价平掉 ``size`` 手（止损/止盈场景）：含滑点与手续费。
+
+        与 ``fill`` 一致的方向口径：平多 = 卖出（向下滑）、平空 = 买入（向上滑）。
+        """
+        direction = "LONG" if size > 0 else "SHORT"
+        price = base_price - self.slip if size > 0 else base_price + self.slip
+        return self._make_trade(bar, direction, "CLOSE", price, abs(size))
+
+    def resize(self, bar, trade: Trade, volume: int) -> Trade:
+        """按新手数生成同方向/同价的替代成交（敞口截断、降级执行用），成本按手数重算。"""
+        return self._make_trade(bar, trade.direction, trade.action, trade.price, volume)
+
     def _make_trade(self, bar, direction: str, action: str, price: float, volume: int) -> Trade:
         return Trade(
             date=bar.date,
