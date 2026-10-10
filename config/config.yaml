@@ -66,3 +66,30 @@ health_check:                   # v1.1 过拟合体检（研究严谨性）：�
     dsr_warn: 0.90              # ≥ 0.90 → 存疑；否则 不通过
     stable_fraction_warn: 0.6   # 邻域稳健占比 < 0.6 → 存疑
     oos_usage_warn: 3           # 样本外使用次数 > 3 → 样本外结论降级为存疑
+
+portfolio:                      # v1.2 组合引擎（多品种 · 共享资金池 · 保证金约束）
+  initial_capital: 100000       # 共享资金池（8 手全开约占用 4 成）
+  sizing:
+    mode: fixed                 # fixed | equal_weight | inv_vol
+    lots: 1                     # fixed：每品种目标手数
+    target_margin_usage: 0.6    # equal_weight / inv_vol：保证金使用率上限
+    vol_window: 60              # inv_vol：波动率窗口（交易日）
+    max_lots_per_symbol: 10     # 单品种手数上限
+  symbols:                      # 品种池（8 中小合约 · 4 板块 · 2026-10-10 核对）
+    - { code: RB0, strategy: dual_ma, params: { fast: 5, slow: 20 } }
+    - { code: I0,  strategy: dual_ma, params: { fast: 5, slow: 20 } }
+    - { code: M0,  strategy: dual_ma, params: { fast: 5, slow: 20 } }
+    - { code: P0,  strategy: dual_ma, params: { fast: 5, slow: 20 } }
+    - { code: SR0, strategy: dual_ma, params: { fast: 5, slow: 20 } }
+    - { code: MA0, strategy: dual_ma, params: { fast: 5, slow: 20 } }
+    - { code: TA0, strategy: dual_ma, params: { fast: 5, slow: 20 } }
+    - { code: AL0, strategy: dual_ma, params: { fast: 5, slow: 20 } }
+  contracts:                    # 合约与成本参数（近似口径，2026-10-10 akshare 核对；可覆盖）
+    RB0: { multiplier: 10,  tick_size: 1.0, margin_rate: 0.07, commission_per_lot: 3.1 }
+    I0:  { multiplier: 100, tick_size: 0.5, margin_rate: 0.08, commission_per_lot: 6.8 }
+    M0:  { multiplier: 10,  tick_size: 1.0, margin_rate: 0.07, commission_per_lot: 1.5 }
+    P0:  { multiplier: 10,  tick_size: 2.0, margin_rate: 0.08, commission_per_lot: 2.5 }
+    SR0: { multiplier: 10,  tick_size: 1.0, margin_rate: 0.06, commission_per_lot: 2.0 }
+    MA0: { multiplier: 10,  tick_size: 1.0, margin_rate: 0.09, commission_per_lot: 3.8 }
+    TA0: { multiplier: 5,   tick_size: 2.0, margin_rate: 0.07, commission_per_lot: 3.0 }
+    AL0: { multiplier: 5,   tick_size: 5.0, margin_rate: 0.11, commission_per_lot: 3.0 }

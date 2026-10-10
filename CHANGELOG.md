@@ -6,6 +6,18 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-10
+
+### Added
+- **组合引擎（v1.2）**：新增 `run_portfolio.py` 一键入口与 `src/engine/{contracts,account,portfolio_engine,sizing}.py` —— 多品种并行、**共享资金池**（保证金占用按收盘价逐日重估、可用资金不足**拒绝开仓并记事件**）、逐日盯市；单品种链路零改动。
+- **头寸规模三模式**：`fixed`（默认，每品种 1 手）/ `equal_weight` / `inv_vol`（波动率倒数），`config.portfolio.sizing` 配置。
+- **组合报告与图表**：`src/report/{portfolio_report,portfolio_plot}.py` —— 组合汇总（收益 / 回撤 / 夏普 / 保证金占用与峰值利用率 / 约束事件）、逐品种汇总、相关性矩阵；4 张组合图表与 3 个明细 CSV。
+- 品种池：8 个中小合约 · 4 板块（RB0 / I0 / M0 / P0 / SR0 / MA0 / TA0 / AL0）；合约参数表按 akshare 2026-10-10 数据核对（交易所保证金口径近似，可覆盖）。
+- 新增 18 个单元测试（账户 / 头寸规模 / 组合引擎 / 组合报告），含**财务闭合**与**约束前逐笔一致性**断言。
+
+### Changed
+- `pyproject.toml` 版本号 `1.1.0` → `1.2.0`；`config.yaml` 新增 `portfolio` 配置段。
+
 ## [1.1.0] - 2026-10-09
 
 ### Added
@@ -48,7 +60,8 @@
 - 报告层：绩效指标（收益 / 回撤 / 夏普 / 胜率 / 盈亏比 / 成本）+ 权益曲线 / 买卖点图 + 参数扫描对比表。
 - 工程化：`uv` 依赖管理、`pytest` 单元测试、`config.yaml` 配置驱动。
 
-[Unreleased]: https://github.com/Eeyore104/quant-demo/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Eeyore104/quant-demo/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Eeyore104/quant-demo/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Eeyore104/quant-demo/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Eeyore104/quant-demo/releases/tag/v1.0.0
 [0.1.0]: https://github.com/Eeyore104/quant-demo/releases/tag/v0.1.0
