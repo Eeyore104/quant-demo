@@ -6,6 +6,24 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-10
+
+### Added
+- **风控体系（v1.3）**：新增 `src/engine/risk.py` ——
+  - **ATR 风险预算**（第 4 头寸模式 `atr_risk`）：手数 = 权益 × 单笔风险 ÷（止损倍数 × ATR × 乘数），入场锁定、期间不随波动漂移；
+  - **止损止盈**：固定 2×ATR（入场冻结）+ 移动 3×ATR（逐日更新）+ 止盈（开关，默认关）；**盘中触价**口径（跳空按开盘价、盘中按触发价；新仓次日生效）；止损后重入锁定（signal_reset / cooldown / immediate）；
+  - **组合熔断**：三级阶梯（单日亏损→暂停 / 回撤→新开仓减半 / 连续亏损→冷却），收盘判定 → 次日生效，全平为最高级开关（默认关）；
+  - **敞口上限**（单品种/组合名义，开仓事前检查）、**涨跌停方向感知**（跌停拒卖 / 涨停拒买，含「止不掉」如实呈现）、**成交量参与率上限**、保证金不足**降级执行**（v1.2 遗留承接）。
+- **压力测试**（`src/analysis/stress.py`）：历史情景自动识别（单日/5 日跌幅 Top3 + 波动率最高 3 段；双口径：当时实际损失 + 1 手/品种标准化重估）；假设情景（跳空 −2σ/−3σ、连续 3 日跌停、相关性跳升分散化失效）；蒙特卡洛回撤分布（iid bootstrap ×500，P50~P99）。
+- **风险指标**（`src/analysis/risk_metrics.py`）：日频 VaR/CVaR（历史模拟、滚动窗口、95%/99%，只用截至当日历史）、集中度（品种/板块名义占比）、相关性预警（滚动平均相关）。
+- **报告与图表**：组合报告新增「风险与压力测试」章节 + **风控开 / 关对比**（裸奔 vs 全开自动双跑）；新增 3 张图（`risk_compare` / `risk_stress` / `risk_metrics`）与 4 个明细 CSV（`risk_events` / `risk_daily` / `stress_results` / `risk_compare`）。
+- 配置新增 `risk` 段（**全部机制独立开关**）与 `portfolio.sizing` 的 `atr_risk` 参数；风控为 opt-in（`risk_cfg` 缺省时与 v1.2 逐笔一致）。
+- 新增 49 个单元测试（总数 57 → **106**）：头寸 / 止损止盈 / 熔断 / 敞口 / 停板参与率 / 压力测试 / 风险指标 / 端到端 / 报告。
+
+### Changed
+- `run_portfolio.py` 升级为「风控全开 + 裸奔对比」双跑入口；组合报告标注风控口径。
+- `pyproject.toml` 版本号 `1.2.0` → `1.3.0`。
+
 ## [1.2.0] - 2026-10-10
 
 ### Added
@@ -60,7 +78,8 @@
 - 报告层：绩效指标（收益 / 回撤 / 夏普 / 胜率 / 盈亏比 / 成本）+ 权益曲线 / 买卖点图 + 参数扫描对比表。
 - 工程化：`uv` 依赖管理、`pytest` 单元测试、`config.yaml` 配置驱动。
 
-[Unreleased]: https://github.com/Eeyore104/quant-demo/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Eeyore104/quant-demo/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Eeyore104/quant-demo/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Eeyore104/quant-demo/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Eeyore104/quant-demo/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Eeyore104/quant-demo/releases/tag/v1.0.0
