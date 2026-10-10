@@ -2,9 +2,9 @@
 
 ![CI](https://github.com/Eeyore104/quant-demo/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
-![Tests](https://img.shields.io/badge/tests-39%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-57%20passed-brightgreen)
 ![Market](https://img.shields.io/badge/market-China%20Futures-C8102E)
-![Status](https://img.shields.io/badge/status-v1.1%20done-success)
+![Status](https://img.shields.io/badge/status-v1.2%20done-success)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 > 一个结构清晰、可一键运行、能产出专业回测报告的**个人期货量化研究项目**。
@@ -40,6 +40,10 @@
 > 📌 这是一份**诚实**的样例：短周期均线在计入交易成本后并不赚钱（参数扫描中 fast=5 / slow=60 组合为 **+7.05%**，夏普 0.54）。
 > 本项目的价值不是"暴利曲线"，而是**一套可复现、成本透明、可扩展**的量化研究框架。
 
+> 📌 **组合样例（v1.2）**：8 品种 · 双均线(5/20) · 共享资金池 10 万 → 累计 **-98%**、保证金约束事件 1060 次。
+> 这不是"引擎坏了"——框架如实呈现：该朴素策略组合在样本期本身就是亏损组合（独立回测口径合计 ≈ -9.1 万元），
+> 共享资金池再叠加约束路径分歧（≈ -0.4 万元）。亏在哪（品种贡献）、被什么约束（事件日志）、品种间相关性（矩阵），一览无余。
+
 ---
 
 ## 快速开始
@@ -57,9 +61,14 @@ uv sync
 
 # 4. 一键跑通回测（首次联网拉数据，之后走本地缓存）
 uv run python run_backtest.py
+
+# 5. 组合回测（v1.2：8 品种 · 共享资金池 · 保证金约束）
+uv run python run_portfolio.py
 ```
 
 跑完在 `output/` 下得到：权益曲线图、买卖点图、回撤区间图、月度收益热力图、参数邻域热力图、蒙特卡洛对照图、成本敏感性图，以及绩效报告（含成本明细、**样本外验证对比表**与**过拟合体检**）。
+
+组合模式（`run_portfolio.py`）另产出：组合权益与回撤 / 相关性矩阵 / 品种盈亏贡献 / 保证金占用 4 张图，组合报告与 3 个明细 CSV（逐日 / 逐品种 / 约束事件）。
 
 参数对比 / 单元测试：
 
@@ -77,6 +86,7 @@ uv run pytest                             # 单元测试
 - **数据层**：akshare 免费拉取期货日线；CSV 本地缓存（二次运行不联网）；自动清洗（去重 / 去无效 bar）
 - **策略层**：统一策略接口 `StrategyBase` + **策略自动注册表**——新增策略只需在 `src/strategy/` 放一个新文件（内置双均线 / 布林带 / 唐奇安通道三个示例），引擎与入口**零改动**
 - **引擎层**：自研轻量事件驱动回测引擎 —— T 日收盘出信号、T+1 开盘价 ± 滑点成交（**防未来函数**），内置手续费 / 滑点
+- **组合引擎（v1.2）**：多品种并行 + **共享资金池**（保证金占用 / 可用资金不足拒绝开仓 + 事件日志）+ 逐日盯市；头寸规模三模式（固定 / 等权 / 波动率倒数）；组合报告含相关性矩阵、品种贡献与保证金占用曲线，一条命令产出（`run_portfolio.py`）
 - **研究严谨**：内置**样本外验证**（训练段参数择优 → 测试段检验）+ **过拟合体检（v1.1）**——参数邻域细检（悬崖 / 孤峰）、蒙特卡洛对照（信号重排 + Bootstrap）、成本敏感性（收益归零倍数）、Deflated Sharpe 校正、样本外使用次数登记；报告输出逐项判定（通过 / 存疑 / 不通过）与总判定，主动暴露过拟合
 - **报告层**：10 项绩效指标 + 权益曲线 / 买卖点 / 回撤区间 / 月度收益热力图 / 参数扫描热力图（PNG）+ 参数扫描对比表
 - **预留执行层**：`ExecutionAdapter` 抽象接口 —— 未来接 SimNow 仿真 / CTP 实盘时，**策略代码不改**
@@ -90,12 +100,14 @@ quant-demo/
 ├── src/
 │   ├── data/               # 数据层：akshare 拉取 / CSV 缓存 / 清洗
 │   ├── strategy/           # 策略层：基类 + 双均线/布林带/唐奇安 + 自动注册表
-│   ├── engine/             # 引擎层：事件驱动回测 / 撮合 / 持仓
-│   ├── report/             # 报告层：绩效指标 / 图表 / 报告
+│   ├── engine/             # 引擎层：单品种回测 / 组合引擎（v1.2）/ 撮合 / 持仓
+│   ├── analysis/           # 研究体检：邻域 / 蒙特卡洛 / 成本敏感 / DSR（v1.1）
+│   ├── report/             # 报告层：绩效 / 图表 / 体检 / 组合报告（v1.2）
 │   ├── execution/          # 【预留】SimNow/CTP 实盘适配接口
 │   └── utils/              # 配置加载 / 日志
 ├── scripts/run_param_scan.py   # 参数扫描入口
-├── run_backtest.py             # ★ 一键入口
+├── run_backtest.py             # ★ 单品种一键入口
+├── run_portfolio.py            # ★ 组合入口（v1.2 · 8 品种 · 共享资金池）
 ├── tests/                      # 单元测试
 ├── docs/                       # 项目文档（背景 / PRD / 系统设计）
 ├── data/                       # 数据缓存（gitignore）
@@ -113,10 +125,12 @@ quant-demo/
 | 换策略 | `strategy.name` | `dual_ma` / `bollinger` / `donchian` |
 | 调参数 | `strategy.params` | 双均线 `fast: 5, slow: 20` |
 | 调成本 | `backtest.commission_per_lot` / `slippage_ticks` | 手续费 1.2 元/手、滑点 1 跳 |
-
-> 不知道有哪些品种可用？运行 `uv run python scripts/list_symbols.py` 查看全部 80+ 个主力连续合约（代码 / 名称 / 交易所）。
 | 样本外分段 | `backtest.oos.split_date`（优先）/ `ratio` | `2024-10-01` 或 `0.7` |
 | 参数网格 | `strategy.grid.<策略名>` | 参数扫描逐格遍历 |
+| 组合品种池 | `portfolio.symbols` | 8 品种（代码 / 策略 / 参数） |
+| 组合头寸规模 | `portfolio.sizing.mode` | `fixed` / `equal_weight` / `inv_vol` |
+
+> 不知道有哪些品种可用？运行 `uv run python scripts/list_symbols.py` 查看全部 80+ 个主力连续合约（代码 / 名称 / 交易所）。
 
 ## 设计要点（为什么这么做）
 
@@ -132,6 +146,7 @@ quant-demo/
 - [x] **M1–M5 回测最小闭环**（作品集级）：数据 → 策略 → 回测 → 报告 → 参数对比
 - [x] **v1.0 交付级完善**：CI / License / 代码规范 / 样本外验证 / 参数扫描热力图 / 唐奇安策略（多策略自动注册）
 - [x] **v1.1 研究体检补全**：过拟合四件套（参数邻域 / 蒙特卡洛 / 成本敏感性）+ Deflated Sharpe 校正 + 样本外使用次数登记
+- [x] **v1.2 组合引擎**：多品种并行 + 共享资金池（保证金约束 + 拒绝开仓事件）+ 组合报告（相关性 / 贡献 / 保证金占用）
 - [ ] **M6–M7 研究平台化 + 仿真**：本地数据库、SimNow 模拟盘接入
 - [ ] **M8–M9 Web 看板 + 实盘准备**：可视化看板、风控模块、程序化交易报备后小资金实盘
 
@@ -151,6 +166,11 @@ quant-demo/
 | `docs/03-系统设计与任务分解.md` | 架构设计、数据模型、任务分解、落地路线 |
 | `docs/04-增量PRD-v1.0.md` | v1.0 增量产品需求 |
 | `docs/05-增量设计与任务列表-v1.0.md` | v1.0 增量系统设计与任务分解 |
+| `docs/06-验收报告-v1.0.md` | v1.0 QA 验收报告（含 Round 2 复验） |
+| `docs/07-框架补齐路线图.md` | v1.1 → v2.0 框架补齐路线图（版本序 / 验收线 / 待确认清单） |
+| `docs/08-增量设计与任务列表-v1.1.md` | v1.1 研究体检增量设计 |
+| `docs/09-验收报告-v1.1.md` | v1.1 QA 验收报告（含 CI 复验） |
+| `docs/10-增量设计与任务列表-v1.2.md` | v1.2 组合引擎增量设计 |
 
 ## 许可证
 
