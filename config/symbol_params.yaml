@@ -1,0 +1,100 @@
+# ================================================================
+# 品种参数全量表（自动生成，勿手改——需要覆盖时用 config.yaml 的
+# backtest.params_by_symbol 手动层，优先级更高）
+# 生成: scripts/build_symbol_params.py ｜ 时间: 2026-10-10 16:41
+# note 含义: verified 三重校验 / adjusted 按每跳毛利折算(报价口径修正) / fees openctp费用表(单源)
+# 覆盖 81/82 个品种；未覆盖: LR0
+# 手续费为交易所近似口径（元/手，可覆盖）
+# ================================================================
+# —— 上期所（19）——
+"AD0": { tick_size: 5, contract_multiplier: 10, commission_per_lot: 11.6, note: verified }
+"AG0": { tick_size: 1, contract_multiplier: 15, commission_per_lot: 21.8, note: verified }
+"AL0": { tick_size: 5, contract_multiplier: 5, commission_per_lot: 6, note: verified }
+"AO0": { tick_size: 1, contract_multiplier: 20, commission_per_lot: 10.8, note: verified }
+"AU0": { tick_size: 0.02, contract_multiplier: 1000, commission_per_lot: 20, note: verified }
+"BR0": { tick_size: 5, contract_multiplier: 5, commission_per_lot: 3.3, note: verified }
+"BU0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 2.7, note: verified }
+"CU0": { tick_size: 10, contract_multiplier: 5, commission_per_lot: 82.2, note: verified }
+"FU0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 2.5, note: verified }
+"HC0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 6.5, note: verified }
+"NI0": { tick_size: 10, contract_multiplier: 1, commission_per_lot: 6, note: verified }
+"OP0": { tick_size: 2, contract_multiplier: 40, commission_per_lot: 3, note: verified }
+"PB0": { tick_size: 5, contract_multiplier: 5, commission_per_lot: 3.2, note: verified }
+"RB0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 6.2, note: verified }
+"RU0": { tick_size: 5, contract_multiplier: 10, commission_per_lot: 3, note: verified }
+"SN0": { tick_size: 10, contract_multiplier: 1, commission_per_lot: 6, note: verified }
+"SP0": { tick_size: 2, contract_multiplier: 10, commission_per_lot: 0.9, note: verified }
+"SS0": { tick_size: 5, contract_multiplier: 5, commission_per_lot: 2, note: verified }
+"ZN0": { tick_size: 5, contract_multiplier: 5, commission_per_lot: 3, note: verified }
+
+# —— 能源中心（5）——
+"BC0": { tick_size: 10, contract_multiplier: 5, commission_per_lot: 4.9, note: verified }
+"EC0": { tick_size: 0.5, contract_multiplier: 50, commission_per_lot: 247.4, note: verified }
+"LU0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 1.1, note: verified }
+"NR0": { tick_size: 5, contract_multiplier: 10, commission_per_lot: 3.5, note: verified }
+"SC0": { tick_size: 0.1, contract_multiplier: 1000, commission_per_lot: 20, note: verified }
+
+# —— 大商所（22）——
+"A0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 4, note: verified }
+"B0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 2, note: verified }
+"BZ0": { tick_size: 1, contract_multiplier: 30, commission_per_lot: 6, note: verified }
+"C0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 2.4, note: verified }
+"CS0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 3, note: verified }
+"EB0": { tick_size: 1, contract_multiplier: 5, commission_per_lot: 2, note: verified }
+"EG0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 6, note: verified }
+"FB0": { tick_size: 0.5, contract_multiplier: 10, commission_per_lot: 1.2, note: verified }
+"I0": { tick_size: 0.5, contract_multiplier: 100, commission_per_lot: 13.7, note: verified }
+"J0": { tick_size: 0.5, contract_multiplier: 100, commission_per_lot: 55.8, note: verified }
+"JD0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 11, note: adjusted }
+"JM0": { tick_size: 0.5, contract_multiplier: 60, commission_per_lot: 18.2, note: verified }
+"L0": { tick_size: 1, contract_multiplier: 5, commission_per_lot: 2, note: verified }
+"LG0": { tick_size: 0.5, contract_multiplier: 90, commission_per_lot: 4.5, note: verified }
+"LH0": { tick_size: 5, contract_multiplier: 16, commission_per_lot: 68.1, note: verified }
+"M0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 3, note: verified }
+"P0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 5, note: verified }
+"PG0": { tick_size: 1, contract_multiplier: 20, commission_per_lot: 12, note: verified }
+"PP0": { tick_size: 1, contract_multiplier: 5, commission_per_lot: 2, note: verified }
+"RR0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 2, note: verified }
+"V0": { tick_size: 1, contract_multiplier: 5, commission_per_lot: 2, note: verified }
+"Y0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 5, note: verified }
+
+# —— 郑商所（24）——
+"AP0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 15, note: verified }
+"CF0": { tick_size: 5, contract_multiplier: 5, commission_per_lot: 4.3, note: verified }
+"CJ0": { tick_size: 5, contract_multiplier: 5, commission_per_lot: 6, note: verified }
+"CY0": { tick_size: 5, contract_multiplier: 5, commission_per_lot: 1, note: verified }
+"FG0": { tick_size: 1, contract_multiplier: 20, commission_per_lot: 4, note: verified }
+"JR0": { tick_size: 1, contract_multiplier: 20, commission_per_lot: 3.01, note: fees }
+"MA0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 7.6, note: verified }
+"OI0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 4, note: verified }
+"PF0": { tick_size: 2, contract_multiplier: 5, commission_per_lot: 2, note: verified }
+"PK0": { tick_size: 2, contract_multiplier: 5, commission_per_lot: 4, note: verified }
+"PL0": { tick_size: 1, contract_multiplier: 20, commission_per_lot: 3, note: verified }
+"PR0": { tick_size: 2, contract_multiplier: 15, commission_per_lot: 6.5, note: verified }
+"PX0": { tick_size: 2, contract_multiplier: 5, commission_per_lot: 5, note: verified }
+"RI0": { tick_size: 1, contract_multiplier: 20, commission_per_lot: 2.51, note: fees }
+"RM0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 1.5, note: verified }
+"RS0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 2, note: verified }
+"SA0": { tick_size: 1, contract_multiplier: 20, commission_per_lot: 4, note: verified }
+"SF0": { tick_size: 2, contract_multiplier: 5, commission_per_lot: 2, note: verified }
+"SH0": { tick_size: 1, contract_multiplier: 30, commission_per_lot: 5.4, note: verified }
+"SM0": { tick_size: 2, contract_multiplier: 5, commission_per_lot: 2, note: verified }
+"SR0": { tick_size: 1, contract_multiplier: 10, commission_per_lot: 2, note: verified }
+"TA0": { tick_size: 2, contract_multiplier: 5, commission_per_lot: 3, note: verified }
+"UR0": { tick_size: 1, contract_multiplier: 20, commission_per_lot: 7, note: verified }
+"WH0": { tick_size: 1, contract_multiplier: 20, commission_per_lot: 30.01, note: fees }
+
+# —— 中金所（6）——
+"IC0": { tick_size: 0.2, contract_multiplier: 200, commission_per_lot: 359, note: verified }
+"IF0": { tick_size: 0.2, contract_multiplier: 300, commission_per_lot: 321.5, note: verified }
+"IH0": { tick_size: 0.2, contract_multiplier: 300, commission_per_lot: 209.3, note: verified }
+"IM0": { tick_size: 0.2, contract_multiplier: 200, commission_per_lot: 353.7, note: verified }
+"TF0": { tick_size: 0.005, contract_multiplier: 10000, commission_per_lot: 3, note: adjusted }
+"TS0": { tick_size: 0.002, contract_multiplier: 20000, commission_per_lot: 3, note: adjusted }
+
+# —— 广期所（5）——
+"LC0": { tick_size: 20, contract_multiplier: 1, commission_per_lot: 19.4, note: verified }
+"PD0": { tick_size: 0.05, contract_multiplier: 1000, commission_per_lot: 27.1, note: verified }
+"PS0": { tick_size: 5, contract_multiplier: 3, commission_per_lot: 38.3, note: verified }
+"PT0": { tick_size: 0.05, contract_multiplier: 1000, commission_per_lot: 40.5, note: verified }
+"SI0": { tick_size: 5, contract_multiplier: 5, commission_per_lot: 4.3, note: verified }

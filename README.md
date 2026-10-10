@@ -79,6 +79,9 @@ uv run python run_portfolio.py
 
 组合模式（`run_portfolio.py`）另产出：组合权益与回撤 / 相关性矩阵 / 品种盈亏贡献 / 保证金占用 4 张图，组合报告与 3 个明细 CSV（逐日 / 逐品种 / 约束事件）；并追加 **「风险与压力测试」章节**、**风控开/关对比**（自动双跑）、3 张风控图（对比 / 压力测试 / 风险指标）与 4 个风控 CSV（事件 / 逐日指标 / 压力测试 / 对比）。
 
+> 💡 **图太多不想一个个点？** 两条链路结束时都会自动刷新两个总览入口（也可随时运行 `uv run python scripts/make_overview.py` 手动刷新）：
+> `output/overview.png` —— 一张分区拼图（快速扫视 / 分享截图）；`output/overview.html` —— 单页图表浏览（原尺寸、自包含、双击滚完全部图表）。
+
 参数对比 / 单元测试：
 
 ```powershell
@@ -130,7 +133,9 @@ quant-demo/
 
 | 想改什么 | 改哪里 | 示例 |
 |---|---|---|
-| 换品种 | `data.symbol` | `C0`（玉米主连）→ `M0`（豆粕主连） |
+| 换品种 | `data.symbol` | `C0`（玉米主连）→ `M0`（豆粕主连）——**参数自动带出，只改这一行** |
+| 品种参数全量表 | `config/symbol_params.yaml`（自动生成） | 覆盖 81 个品种（多源交叉校验）；`uv run python scripts/build_symbol_params.py` 一键刷新 |
+| 手动覆盖参数 | `backtest.params_by_symbol` | 一般留空；需要时覆盖某品种（优先级最高） |
 | 换回测区间 | `data.start_date` / `end_date` | `2021-10-01` ~ `2026-10-01` |
 | 换策略 | `strategy.name` | `dual_ma` / `bollinger` / `donchian` |
 | 调参数 | `strategy.params` | 双均线 `fast: 5, slow: 20` |

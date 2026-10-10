@@ -17,6 +17,7 @@ from src.data.symbols import instrument_label, normalize_symbol
 from src.engine.contracts import build_contracts
 from src.engine.portfolio_engine import run_portfolio
 from src.report.metrics import analyze as analyze_metrics
+from src.report.overview import build_overview
 from src.report.portfolio_plot import (
     plot_portfolio_contribution,
     plot_portfolio_correlation,
@@ -237,12 +238,21 @@ def main() -> None:
             )
         )
 
+    # ⑧ 图表总览（overview.png 拼图 + overview.html 单页浏览；失败不影响回测结果）
+    try:
+        overview_paths = build_overview(resolve_path(fig_dir), resolve_path(fig_dir).parent)
+    except Exception:
+        overview_paths = {}
+        log.warning("图表总览生成失败（不影响回测结果）", exc_info=True)
+
     print()
     print(text)
     for name, path in figures.items():
         log.info("图表已保存：%s -> %s", name, path)
     for name, path in csv_paths.items():
         log.info("明细已保存：%s -> %s", name, path)
+    for name, path in overview_paths.items():
+        log.info("总览已刷新：%s -> %s", name, path)
     log.info("组合报告已生成：%s", report_path)
     if risk_enabled and compare:
         b, r = compare["bare"], compare["risk"]

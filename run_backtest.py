@@ -15,6 +15,7 @@ from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
 from src.engine.walkforward import run_oos
 from src.report import metrics as metrics_mod
+from src.report.overview import build_overview
 from src.report.plotter import (
     plot_drawdown,
     plot_equity,
@@ -26,7 +27,7 @@ from src.report.plotter import (
 )
 from src.report.report import build_health_table, build_oos_table, build_report_text, save_report
 from src.strategy.registry import get_strategy
-from src.utils.config_loader import load_config, resolve_path
+from src.utils.config_loader import load_config, load_symbol_params, resolve_path
 from src.utils.logger import get_logger
 
 
@@ -53,6 +54,34 @@ def load_data(d: dict, log):
     return df
 
 
+_DEFAULT_SRC = "默认值（未登记 ⚠️）"
+
+
+def resolve_symbol_params(b: dict, symbol: str, auto_table: dict | None = None) -> tuple[dict, str]:
+    """解析单品种参数：手动登记（config）→ 自动全量表（symbol_params.yaml）→ 默认值。
+
+    返回 ``(参数, 来源标签)``；登记条目可只写部分字段，缺的用默认值补齐。
+    """
+    manual = (b.get("params_by_symbol") or {}).get(symbol) or {}
+    auto = (auto_table or {}).get(symbol) or {}
+    if manual and auto:
+        entry, src = {**auto, **manual}, "手动登记（自动表补缺）"
+    elif manual:
+        entry, src = manual, "手动登记（backtest.params_by_symbol）"
+    elif auto:
+        entry, src = auto, "自动全量表（config/symbol_params.yaml）"
+    else:
+        entry, src = {}, _DEFAULT_SRC
+    return (
+        {
+            "tick_size": float(entry.get("tick_size", b["tick_size"])),
+            "contract_multiplier": int(entry.get("contract_multiplier", b["contract_multiplier"])),
+            "commission_per_lot": float(entry.get("commission_per_lot", b["commission_per_lot"])),
+        },
+        src,
+    )
+
+
 def main() -> None:
     log = get_logger("main")
     cfg = load_config()
@@ -62,6 +91,22 @@ def main() -> None:
     if d["symbol"] != raw_symbol:
         log.warning("config 品种代码 %r 结尾是字母 O，已自动按 %r 处理", raw_symbol, d["symbol"])
     label = instrument_label(d["symbol"])
+
+    # 品种参数：手动登记 → 自动全量表（symbol_params.yaml）→ 默认值 + 醒目告警
+    resolved, src = resolve_symbol_params(b, d["symbol"], load_symbol_params())
+    if src == _DEFAULT_SRC:
+        log.warning(
+            "⚠️ 品种 %s 未收录（手动登记表与自动全量表均无），使用默认参数"
+            "（tick %s / 乘数 %s / 手续费 %s）——绝对收益与成本口径可能失真，"
+            "核对后可加入 backtest.params_by_symbol",
+            d["symbol"],
+            resolved["tick_size"],
+            resolved["contract_multiplier"],
+            resolved["commission_per_lot"],
+        )
+    else:
+        log.info("品种参数来源：%s → %s", src, resolved)
+    b.update(resolved)
 
     # ① 数据
     df = load_data(d, log)
@@ -108,12 +153,14 @@ def main() -> None:
     )
 
     params_desc = ", ".join(f"{k}={v}" for k, v in params.items())
+    src_desc = src
     header = [
         f"品种       : {label}",
         f"区间       : {d['start_date']} ~ {d['end_date']}",
         f"策略       : {name}({params_desc})",
         f"初始资金   : {b['initial_capital']:.0f} 元 / 固定 {b['position_size']} 手",
         f"成本设定   : 手续费 {b['commission_per_lot']} 元/手，滑点 {b['slippage_ticks']} 跳",
+        f"参数来源   : {src_desc}",
     ]
 
     # ④.1 样本外验证（旁路增强：engine.run() 零改动，仅在上层编排）
@@ -225,6 +272,17 @@ def main() -> None:
     print()
     print(text)
     log.info("报告已生成：%s", report_path)
+
+    # ⑤ 图表总览（output/overview.png + overview.html；失败不影响回测结果）
+    try:
+        overview_paths = build_overview(
+            resolve_path(out["figure_dir"]), resolve_path(out["figure_dir"]).parent
+        )
+    except Exception:
+        overview_paths = {}
+        log.warning("图表总览生成失败（不影响回测结果）", exc_info=True)
+    for name, path in overview_paths.items():
+        log.info("总览已刷新：%s -> %s", name, path)
 
 
 if __name__ == "__main__":

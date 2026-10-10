@@ -4,7 +4,7 @@
 # ================================================
 
 data:
-  symbol: "C0"                  # 玉米主力连续（C0 = 玉米主连，akshare 惯例）
+  symbol: "AU0"                  # 当前回测品种（主力连续，如 C0 玉米 / AU0 黄金）
   start_date: "2021-10-01"      # 回测起始（近 5 年）
   end_date: "2026-10-01"        # 回测结束
   raw_dir: "data/raw"           # 原始数据缓存目录
@@ -29,10 +29,16 @@ strategy:
 backtest:
   initial_capital: 100000       # 初始资金（元）
   position_size: 1              # 目标仓位（手）——MVP 固定 1 手
-  commission_per_lot: 1.2       # 手续费（元/手），玉米约 1.2
+  # 以下三个字段是「未登记品种」的兜底默认值（= 玉米 C0 口径）；
+  # 换品种时无需手动改：已登记品种会自动按下面的 params_by_symbol 带出
+  commission_per_lot: 1.2       # 手续费（元/手，默认玉米）
   slippage_ticks: 1             # 滑点（跳数）
-  tick_size: 1.0                # 最小变动价位（玉米 1 元/吨）
-  contract_multiplier: 10       # 合约乘数（玉米 10 吨/手）
+  tick_size: 1.0                # 最小变动价位（默认玉米 1 元/吨）
+  contract_multiplier: 10       # 合约乘数（默认玉米 10 吨/手）
+  params_by_symbol: {}          # 手动覆盖表（优先级最高；一般留空即可）
+    # 全量品种参数（81 个）见 config/symbol_params.yaml（脚本自动生成）；
+    # 换品种只改 data.symbol 一行。需要覆盖某品种时在此登记，例如：
+    # AU0: { tick_size: 0.02, contract_multiplier: 1000, commission_per_lot: 20.0 }
   oos:                          # 样本外验证（训练段择优 → 测试段检验）
     enabled: true               # 是否在报告末尾追加样本外验证
     split_date: "2024-10-01"    # 训练段 <= 该日 < 测试段（优先）
