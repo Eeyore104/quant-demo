@@ -10,6 +10,12 @@ output/
 !data/raw/.gitkeep
 !data/clean/.gitkeep
 
+# 本地私有配置（webhook URL 等敏感信息，绝不进库）
+config/config.local.yaml
+
+# 运行日志
+logs/
+
 # 测试与检查缓存
 .pytest_cache/
 .ruff_cache/

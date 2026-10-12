@@ -14,6 +14,7 @@ from src.engine.broker import Broker
 from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
 from src.engine.walkforward import run_oos
+from src.report import html_report
 from src.report import metrics as metrics_mod
 from src.report.overview import build_overview
 from src.report.plotter import (
@@ -26,6 +27,7 @@ from src.report.plotter import (
     plot_signals,
 )
 from src.report.report import build_health_table, build_oos_table, build_report_text, save_report
+from src.results import db as results_db
 from src.strategy.registry import get_strategy
 from src.utils.config_loader import load_config, load_symbol_params, resolve_path
 from src.utils.logger import get_logger
@@ -180,6 +182,7 @@ def main() -> None:
 
     # ④.2 过拟合体检（v1.1：四件套 + DSR；单项失败不拖垮主流程）
     hc_cfg = cfg.get("health_check") or {}
+    health = None
     if hc_cfg.get("enabled", False):
         health = run_health_check(
             df=df,
@@ -241,6 +244,35 @@ def main() -> None:
     text = build_report_text(m, header, figures, extra_sections=extra_sections)
     report_path = save_report(text, resolve_path(f"{out['report_dir']}/backtest_report.txt"))
 
+    # ④.3 HTML 报告（v1.4：自包含单页；失败不影响回测结果，可配置关闭）
+    html_cfg = cfg.get("report_html") or {}
+    report_html_path = None
+    if html_cfg.get("enabled", True):
+        try:
+            content = html_report.render_backtest_html(
+                symbol=d["symbol"],
+                label=label,
+                strategy=name,
+                params=params,
+                start_date=d["start_date"],
+                end_date=d["end_date"],
+                initial_capital=float(b["initial_capital"]),
+                metrics=m,
+                figures=figures,
+                text_report=text,
+                health=health,
+            )
+            fname = html_report.report_filename(
+                f"report_{d['symbol']}", keep_history=bool(html_cfg.get("keep_history", True))
+            )
+            report_html_path = html_report.save_html(
+                content, resolve_path(f"{out['report_dir']}/{fname}")
+            )
+            log.info("HTML 报告已生成：%s", report_html_path)
+        except Exception:
+            report_html_path = None
+            log.warning("HTML 报告生成失败（不影响回测结果）", exc_info=True)
+
     print()
     print(text)
     log.info("报告已生成：%s", report_path)
@@ -255,6 +287,31 @@ def main() -> None:
         log.warning("图表总览生成失败（不影响回测结果）", exc_info=True)
     for name, path in overview_paths.items():
         log.info("总览已刷新：%s -> %s", name, path)
+
+    # ⑥ 结果登记（v1.4 结果库：SQLite；失败不影响回测结果，可配置关闭）
+    storage_cfg = cfg.get("storage") or {}
+    if storage_cfg.get("enabled", True):
+        db_path = resolve_path(storage_cfg.get("db_path", "output/db/quant.sqlite3"))
+        try:
+            conn = results_db.open_db(db_path)
+            run_id = results_db.record_backtest_run(
+                conn,
+                symbol=d["symbol"],
+                strategy=s["name"],
+                params=params,
+                start_date=d["start_date"],
+                end_date=d["end_date"],
+                initial_capital=float(b["initial_capital"]),
+                metrics=m,
+                trades=trades,
+                health_verdict=health.overall if health is not None else None,
+                report_html=report_html_path,
+                meta={"data_bars": len(df), "position_size": b["position_size"]},
+            )
+            conn.close()
+            log.info("结果已登记：run_id=%s -> %s", run_id, db_path)
+        except Exception:
+            log.warning("结果登记失败（不影响回测结果）", exc_info=True)
 
 
 if __name__ == "__main__":

@@ -148,3 +148,25 @@ risk:                           # v1.3 风控体系（全部可开关；详见 d
     农产品: [M0, P0, SR0]
     能化: [MA0, TA0]
     有色: [AL0]
+
+storage:                        # v1.4 结果库（SQLite：回测结果/交易明细/风控事件/质量记录）
+  enabled: true                 # 关闭 = 不登记（行为回到 v1.3）
+  db_path: "output/db/quant.sqlite3"
+
+report_html:                    # v1.4 HTML 报告（每次回测一份自包含报告页；轮 2 落地）
+  enabled: true
+  keep_history: true            # true=时间戳保留历史；false=仅保留最新
+
+notify:                         # v1.4 通知（企业微信 webhook；轮 3 接入每日流水线）
+  enabled: true                 # URL 未配置时自动降级为日志（WECOM_WEBHOOK_URL / config.local.yaml）
+  on_success: true              # 每日跑批成功摘要
+  on_failure: true              # 失败告警
+
+quality:                        # v1.4 数据质量校验（轮 2 落地）
+  recent_days: 10               # 新鲜度窗口（交易日）
+  gap_max_days: 10              # 相邻数据间隔告警阈值（自然日）
+  jump_pct_warn: 0.15           # 单日跳变告警阈值
+
+schedule:                       # v1.4 每日调度（轮 3 任务计划注册参数）
+  time: "17:00"
+  weekday: true                 # 仅工作日注册（节假日由 daily_run 二次判断）

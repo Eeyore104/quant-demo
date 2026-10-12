@@ -73,11 +73,26 @@ uv run python run_backtest.py
 
 # 5. 组合回测（v1.3：风控全开 + 裸奔对比 · 一条命令双跑）
 uv run python run_portfolio.py
+
+# 6. 数据质量校验（缺口 / 异常 / 新鲜度 → 报告 + 入库）
+uv run python scripts/check_data.py
+
+# 7. Streamlit 看板（可选依赖：历史一览 / 详情 / 对比；浏览器打开 http://localhost:8501）
+uv sync --extra dashboard
+uv run --extra dashboard streamlit run dashboard/app.py
+
+# 8. 每日流水线（数据更新 → 跑批 → 报告 → 通知）
+uv run python scripts/daily_run.py
+
+# 9. 注册 Windows 定时任务（每工作日 17:00 自动运行；--uninstall 卸载）
+uv run python scripts/register_task.py --install
 ```
 
 跑完在 `output/` 下得到：权益曲线图、买卖点图、回撤区间图、月度收益热力图、参数邻域热力图、蒙特卡洛对照图、成本敏感性图，以及绩效报告（含成本明细、**样本外验证对比表**与**过拟合体检**）。
 
 组合模式（`run_portfolio.py`）另产出：组合权益与回撤 / 相关性矩阵 / 品种盈亏贡献 / 保证金占用 4 张图，组合报告与 3 个明细 CSV（逐日 / 逐品种 / 约束事件）；并追加 **「风险与压力测试」章节**、**风控开/关对比**（自动双跑）、3 张风控图（对比 / 压力测试 / 风险指标）与 4 个风控 CSV（事件 / 逐日指标 / 压力测试 / 对比）。
+
+v1.4 起，两条链路结束还会自动：输出 **自包含 HTML 报告**（`output/reports/report_*.html`——指标卡 + 图表 + 全文，单文件可直接发送 / 存档）与**结果登记**（`output/db/quant.sqlite3` 归档回测 / 交易 / 风控事件）。
 
 > 💡 **图太多不想一个个点？** 两条链路结束时都会自动刷新两个总览入口（也可随时运行 `uv run python scripts/make_overview.py` 手动刷新）：
 > `output/overview.png` —— 一张分区拼图（快速扫视 / 分享截图）；`output/overview.html` —— 单页图表浏览（原尺寸、自包含、双击滚完全部图表）。
@@ -103,6 +118,7 @@ uv run pytest                             # 单元测试
 - **研究严谨**：内置**样本外验证**（训练段参数择优 → 测试段检验）+ **过拟合体检（v1.1）**——参数邻域细检（悬崖 / 孤峰）、蒙特卡洛对照（信号重排 + Bootstrap）、成本敏感性（收益归零倍数）、Deflated Sharpe 校正、样本外使用次数登记；报告输出逐项判定（通过 / 存疑 / 不通过）与总判定，主动暴露过拟合
 - **报告层**：10 项绩效指标 + 权益曲线 / 买卖点 / 回撤区间 / 月度收益热力图 / 参数扫描热力图（PNG）+ 参数扫描对比表
 - **预留执行层**：`ExecutionAdapter` 抽象接口 —— 未来接 SimNow 仿真 / CTP 实盘时，**策略代码不改**
+- **工程化与看板（v1.4）**：**结果库**（SQLite 归档历次回测 / 交易明细 / 风控事件 / 数据质量批次）· **自包含 HTML 报告**（每次回测一份，单文件可直接发送）· **数据质量校验**（缺口 / 异常 / 新鲜度 / 跨品种对齐 + 逐条排查提示）· **Streamlit 看板**（历史一览 / 单次详情 / 多项对比 · 可选依赖）· **每日流水线 + Windows 定时任务 + 企业微信告警**（数据更新 → 跑批 → 报告 → 通知一条龙）
 - **工程化**：uv 依赖管理 · ruff 代码规范 · pytest 单元测试 · GitHub Actions CI · `config.yaml` 配置驱动（改参数不碰代码）
 
 ## 目录结构
@@ -115,10 +131,12 @@ quant-demo/
 │   ├── strategy/           # 策略层：基类 + 双均线/布林带/唐奇安 + 自动注册表
 │   ├── engine/             # 引擎层：单品种回测 / 组合引擎（v1.2）/ 风控体系（v1.3）/ 撮合 / 持仓
 │   ├── analysis/           # 研究体检：邻域 / 蒙特卡洛 / 成本敏感 / DSR（v1.1）+ 压力测试 / 风险指标（v1.3）
-│   ├── report/             # 报告层：绩效 / 图表 / 体检 / 组合报告（v1.2）/ 风险章节与图表（v1.3）
+│   ├── report/             # 报告层：绩效 / 图表 / 体检 / 组合 / 风险（v1.3）+ HTML 报告（v1.4）
+│   ├── results/            # 结果库（v1.4）：SQLite 归档（回测 / 交易 / 风控事件 / 质量）
 │   ├── execution/          # 【预留】SimNow/CTP 实盘适配接口
-│   └── utils/              # 配置加载 / 日志
-├── scripts/run_param_scan.py   # 参数扫描入口
+│   └── utils/              # 配置加载 / 日志 / 通知（企业微信）
+├── dashboard/                  # ★ Streamlit 看板（v1.4 · 可选依赖）
+├── scripts/                    # 工具脚本：清单 / 参数表 / 扫描 / 质量校验 / 每日流水线 / 定时任务 / 历史查询
 ├── run_backtest.py             # ★ 单品种一键入口
 ├── run_portfolio.py            # ★ 组合入口（v1.2 · 8 品种 · 共享资金池）
 ├── tests/                      # 单元测试
@@ -148,6 +166,10 @@ quant-demo/
 | 风控开关 | `risk.enabled` 及各子项 | 止损止盈 / 熔断 / 敞口 / 涨跌停 / 参与率 全部独立开关 |
 | 止损倍数 | `risk.stops.fixed.atr_mult` / `trailing.atr_mult` | 默认 2×ATR / 3×ATR |
 | 熔断阈值 | `risk.fuse` | 单日亏损 3% / 回撤 15% / 连亏 5 笔（均可调） |
+| 结果库 | `storage.enabled` / `storage.db_path` | 回测结束自动登记（SQLite 归档） |
+| HTML 报告 | `report_html.enabled` / `keep_history` | 每次回测一份自包含报告页 |
+| 数据质量阈值 | `quality.*` | 新鲜度窗口 / 缺口间隔 / 跳变阈值 |
+| 企业微信告警 | `config.local.yaml`（复制 `config.local.yaml.example`） | webhook URL 不进 git；环境变量 `WECOM_WEBHOOK_URL` 优先 |
 
 > 不知道有哪些品种可用？运行 `uv run python scripts/list_symbols.py` 查看全部 80+ 个主力连续合约（代码 / 名称 / 交易所）。
 
@@ -167,7 +189,8 @@ quant-demo/
 - [x] **v1.1 研究体检补全**：过拟合四件套（参数邻域 / 蒙特卡洛 / 成本敏感性）+ Deflated Sharpe 校正 + 样本外使用次数登记
 - [x] **v1.2 组合引擎**：多品种并行 + 共享资金池（保证金约束 + 拒绝开仓事件）+ 组合报告（相关性 / 贡献 / 保证金占用）
 - [x] **v1.3 风控体系**：ATR 风险预算 + 止损止盈（盘中触价）+ 组合熔断三级阶梯 + 压力测试 + 风险指标 + 涨跌停/流动性约束；报告含「风险与压力测试」章节与风控开/关对比
-- [ ] **M6–M7 研究平台化 + 仿真**：本地数据库、SimNow 模拟盘接入
+- [x] **v1.4 工程化与看板**：结果库（SQLite）+ 数据质量校验 + 自包含 HTML 报告 + Streamlit 看板 + 每日流水线（数据更新 → 跑批 → 报告 → 通知）+ Windows 定时任务 + 企业微信告警
+- [ ] **v2.0 SimNow 仿真链路**：CTP 通道接入 · 信号 → 下单 → 成交回报 → 持仓 → 日报 · 连续多交易日无人值守（工程地基 v1.4 已就绪）
 - [ ] **M8–M9 Web 看板 + 实盘准备**：可视化看板、风控模块、程序化交易报备后小资金实盘
 
 ## 合规提示（重要）

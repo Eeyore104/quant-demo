@@ -16,6 +16,7 @@ from src.analysis.stress import run_stress
 from src.data.symbols import instrument_label, normalize_symbol
 from src.engine.contracts import build_contracts
 from src.engine.portfolio_engine import run_portfolio
+from src.report import html_report
 from src.report.metrics import analyze as analyze_metrics
 from src.report.overview import build_overview
 from src.report.portfolio_plot import (
@@ -33,6 +34,7 @@ from src.report.portfolio_report import (
 from src.report.report import save_report
 from src.report.risk_plot import plot_risk_compare, plot_risk_metrics, plot_risk_stress
 from src.report.risk_report import build_risk_section, save_risk_artifacts
+from src.results import db as results_db
 from src.strategy.registry import get_strategy
 from src.utils.config_loader import load_config, resolve_path
 from src.utils.logger import get_logger
@@ -244,6 +246,63 @@ def main() -> None:
     except Exception:
         overview_paths = {}
         log.warning("图表总览生成失败（不影响回测结果）", exc_info=True)
+
+    # ⑧.1 HTML 报告（v1.4：自包含单页；失败不影响回测结果，可配置关闭）
+    m_port = analyze_metrics(result.equity_df, result.trades, initial_capital)
+    html_cfg = cfg.get("report_html") or {}
+    report_html_path = None
+    if html_cfg.get("enabled", True):
+        try:
+            content = html_report.render_portfolio_html(
+                labels=labels,
+                symbols=list(data.keys()),
+                start_date=d["start_date"],
+                end_date=d["end_date"],
+                initial_capital=initial_capital,
+                metrics=m_port,
+                compare=compare,
+                risk_enabled=risk_enabled,
+                sizing_desc=sizing_desc,
+                figures=figures,
+                text_report=text,
+            )
+            fname = html_report.report_filename(
+                "report_portfolio", keep_history=bool(html_cfg.get("keep_history", True))
+            )
+            report_html_path = html_report.save_html(
+                content, resolve_path(f"{out['report_dir']}/{fname}")
+            )
+            log.info("HTML 报告已生成：%s", report_html_path)
+        except Exception:
+            report_html_path = None
+            log.warning("HTML 报告生成失败（不影响回测结果）", exc_info=True)
+
+    # ⑨ 结果登记（v1.4 结果库：SQLite；失败不影响回测结果，可配置关闭）
+    storage_cfg = cfg.get("storage") or {}
+    if storage_cfg.get("enabled", True):
+        db_path = resolve_path(storage_cfg.get("db_path", "output/db/quant.sqlite3"))
+        try:
+            conn = results_db.open_db(db_path)
+            run_id = results_db.record_portfolio_run(
+                conn,
+                symbols=list(data.keys()),
+                labels=labels,
+                start_date=d["start_date"],
+                end_date=d["end_date"],
+                initial_capital=initial_capital,
+                metrics=m_port,
+                trades=result.trades,
+                risk_events=result.risk_events,
+                constraint_events=result.events,
+                risk_enabled=risk_enabled,
+                sizing_desc=sizing_desc,
+                report_html=report_html_path,
+                meta={"sizing": mode, "symbols_count": len(data)},
+            )
+            conn.close()
+            log.info("结果已登记：run_id=%s -> %s", run_id, db_path)
+        except Exception:
+            log.warning("结果登记失败（不影响回测结果）", exc_info=True)
 
     print()
     print(text)

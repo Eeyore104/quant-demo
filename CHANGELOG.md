@@ -4,9 +4,14 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [1.4.0] - 2026-10-12
 
 ### Added
+- **结果库（SQLite）**：`src/results/db.py` —— 每次回测自动登记（runs / trades / risk_events / data_quality 四表 + WAL）；历次回测结果、交易明细、风控事件与数据质量批次统一归档；查询函数供看板与命令行（`scripts/list_runs.py`）共用。
+- **自包含 HTML 报告**：`src/report/html_report.py` —— 每次回测一份独立报告页（指标卡 + 图表 base64 内嵌 + 完整文本折叠区）；单文件可直接发送 / 存档（红涨绿跌）。
+- **数据质量校验**：`src/data/quality.py` + `scripts/check_data.py` —— 结构 / 跳变 / 缺口 / 新鲜度 / 跨品种对齐五类检查；交易日历缓存（不可得时降级间隔启发式）；报告含逐条证据与「排查提示」（常见原因 + 处理建议）。
+- **Streamlit 看板**：`dashboard/app.py` —— 历史一览 / 单次详情（指标 + 交易明细 + 风控事件）/ 多项对比 / 图表浏览；**可选依赖组** `dashboard`（`uv sync --extra dashboard`），主链路保持零新增依赖。
+- **每日流水线 + 调度 + 告警**：`scripts/daily_run.py`（交易日判断 → 数据更新（重拉全区间）→ 跑批 → 质量检查 → 汇总通知）；`scripts/register_task.py`（Windows 任务计划：工作日定时 + 错过补跑）；`src/utils/notify.py`（企业微信 webhook，失败重试 + 未配置降级；URL 走 `config.local.yaml` / 环境变量，不进 git）；日志按日滚动（`logs/`）。
 - **图表总览（overview）**：`run_backtest.py` / `run_portfolio.py` 结束时自动刷新 `output/overview.png`（全部分区拼图，一眼扫完）与 `output/overview.html`（单页图表浏览，原尺寸、自包含、可直接分享）；新增手动刷新脚本 `scripts/make_overview.py`。
 - **品种参数全量表（自动生成 + 多源交叉校验）**：新增 `scripts/build_symbol_params.py` —— 按「新浪品种清单 × 主力合约每跳毛利 × 东财合约详情 × openctp 费用表」生成 `config/symbol_params.yaml`（**覆盖 81/82 个品种**，含校验标签 verified / adjusted / fees）；`run_backtest.py` 三层解析（手动覆盖 → 自动全量表 → 默认值 + 醒目告警）——单品种链路换品种**只改 `data.symbol` 一行**，未覆盖品种会告警而非静默算错。
 
@@ -15,6 +20,7 @@
 
 ### Changed
 - 单品种参数解析抽出共享模块 `src/utils/symbol_params.py`（`run_backtest.py` / `run_param_scan.py` 共用，行为不变）；总览拼图每图标注生成日期，参数扫描完成后自动刷新总览。
+- `pyproject.toml` 版本号 `1.3.0` → `1.4.0`；新增可选依赖组 `dashboard = ["streamlit>=1.40"]`；ruff per-file-ignores 覆盖 `dashboard/*.py`。
 
 ## [1.3.0] - 2026-10-10
 
