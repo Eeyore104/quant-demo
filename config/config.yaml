@@ -170,3 +170,35 @@ quality:                        # v1.4 数据质量校验（轮 2 落地）
 schedule:                       # v1.4 每日调度（轮 3 任务计划注册参数）
   time: "17:00"
   weekday: true                 # 仅工作日注册（节假日由 daily_run 二次判断）
+
+live:                           # v2.0 SimNow 仿真链路（docs/16；默认全关，防误跑）
+  enabled: false                # 总开关
+  dry_run: true                 # 干跑：连行情 / 算信号，不真下单（首跑与联调默认）
+  env: "first"                  # 当前环境：first=第一套（盘中）| 724=7×24（研发）
+  envs:                         # 前置地址（182.254.243.31；以 SimNow 官网公告为准）
+    "first": { md_front: "tcp://182.254.243.31:30011", td_front: "tcp://182.254.243.31:30001" }
+    "724":   { md_front: "tcp://182.254.243.31:40011", td_front: "tcp://182.254.243.31:40001" }
+  broker_id: "9999"
+  app_id: "simnow_client_test"
+  auth_code: "0000000000000000"
+  # investor_id / password → config.local.yaml（敏感，不进 git）
+  flow_dir: "output/live/ctp_flow"
+  nominal_capital: 100000       # 虚拟账本初始权益（10 万口径，与回测逐项一致）
+  contracts_map:                # 主力连续 → 真实合约（✅ 2026-10-12 行情实测定稿，持仓量口径）
+    RB0: rb2701                 # 持仓 168.8 万
+    I0:  i2701                  # 持仓 62.4 万
+    M0:  m2701                  # 持仓 242.3 万
+    P0:  p2701                  # 持仓 60.3 万
+    SR0: SR701                  # 持仓 57.5 万（郑商所为 3 位数字）
+    MA0: MA701                  # 持仓 79.1 万
+    TA0: TA701                  # 持仓 113.5 万
+    AL0: al2611                 # 持仓 25.3 万（实测：＞al2612 17.7 万＞al2701 7.4 万）
+  execute:
+    time: "21:00:05"            # 夜盘执行时点（交易日开盘后数秒）
+    chase_ticks: 1              # 限价追单步长（跳）
+    chase_max: 3                # 最大追单次数（不自动转市价）
+    quote_timeout_seconds: 5    # 单次挂单等待成交秒数
+  signal_time: "17:00"          # 收盘信号计算（与 daily_run 对齐）
+  report_time: "15:05"          # 每日日报
+  heartbeat_seconds: 30
+  reconnect_backoff: [5, 10, 30, 60]

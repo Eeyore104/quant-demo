@@ -674,6 +674,18 @@ wheels = [
 ]
 
 [[package]]
+name = "openctp-ctp"
+version = "6.7.11.0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/6d/81/a4a95867b9d9e4dc8bc32e865b8a98f0b74d2c28d25ce4dcda6e3893f0b7/openctp_ctp-6.7.11.0-cp312-cp312-win32.whl", hash = "sha256:c674447e158de9add5e54287dc827f068e22e4d8d55fd8450c112879c2acdc4e", size = 5687731, upload-time = "2025-08-18T13:52:23.942Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/51/bd/ee024f9ef93a7441dc9dafab3ea22359ff8979cd4e3967e357abf70bacf3/openctp_ctp-6.7.11.0-cp312-cp312-win_amd64.whl", hash = "sha256:a831b95570850076c001687941b1d62c2f4d09abd87ddc670f1ea10eb0d7eb29", size = 8136136, upload-time = "2025-08-18T13:52:41.398Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/29/64/b119ae4fe7ca110d31b0ef5a4cec3e292f4e8216364143b8507caa9cbe36/openctp_ctp-6.7.11.0-cp313-cp313-win32.whl", hash = "sha256:0d1ffa282fa16d2a080d5f154254f6b960a01c3fc9d6ec40dceab22157697551", size = 5713338, upload-time = "2025-08-18T13:53:04.522Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/cd/45/5c04e775b1b8c2a7a1112753519db3eb331569dd3c2378c83505119831c0/openctp_ctp-6.7.11.0-cp313-cp313-win_amd64.whl", hash = "sha256:68fb8af3bb1d8c797a1dee6a1b8b8ddd2a14f285204044e822a521a68e4cbfe1", size = 8136435, upload-time = "2025-08-18T13:53:59.937Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/d4/17/d260d67f38aa005e0ff38def2f44126d8a9627d2d48b1a741db3889b73bd/openctp_ctp-6.7.11.0-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:5780d2a4e927a0c553e0c226764d270708f932d42eae1857ab694febbf2a4eac", size = 9601183, upload-time = "2025-08-21T14:19:33.368Z" },
+]
+
+[[package]]
 name = "openpyxl"
 version = "3.1.5"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -929,6 +941,9 @@ dependencies = [
 dashboard = [
     { name = "streamlit" },
 ]
+live = [
+    { name = "openctp-ctp" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -941,11 +956,12 @@ requires-dist = [
     { name = "akshare", specifier = ">=1.18" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "openctp-ctp", marker = "extra == 'live'", specifier = ">=6.7" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "streamlit", marker = "extra == 'dashboard'", specifier = ">=1.40" },
 ]
-provides-extras = ["dashboard"]
+provides-extras = ["dashboard", "live"]
 
 [package.metadata.requires-dev]
 dev = [

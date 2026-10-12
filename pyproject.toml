@@ -12,8 +12,10 @@ dependencies = [
 ]
 
 # 可选依赖：Streamlit 看板（uv sync --extra dashboard）
+# 可选依赖：SimNow 仿真链路（uv sync --extra live）
 [project.optional-dependencies]
 dashboard = ["streamlit>=1.40"]
+live = ["openctp-ctp>=6.7"]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
