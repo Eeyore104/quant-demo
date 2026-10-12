@@ -24,10 +24,12 @@ from src.engine.broker import Broker
 from src.engine.engine import BacktestEngine
 from src.engine.portfolio import Portfolio
 from src.report import metrics as metrics_mod
+from src.report.overview import build_overview
 from src.report.plotter import plot_param_heatmap
 from src.strategy.registry import get_strategy
-from src.utils.config_loader import load_config, resolve_path
+from src.utils.config_loader import load_config, load_symbol_params, resolve_path
 from src.utils.logger import get_logger
+from src.utils.symbol_params import DEFAULT_SRC, apply_symbol_params
 
 
 def _build_grid(grid: dict) -> list[dict]:
@@ -68,6 +70,20 @@ def main() -> None:
     df = store.load_csv(clean_path)
     df["date"] = pd.to_datetime(df["date"])
     label = instrument_label(d["symbol"])
+
+    # 品种参数：与 run_backtest 同一三层解析（手动 → 自动全量表 → 默认 + 告警）
+    resolved, src = apply_symbol_params(b, d["symbol"], load_symbol_params())
+    if src == DEFAULT_SRC:
+        log.warning(
+            "⚠️ 品种 %s 未收录（手动登记表与自动全量表均无），使用默认参数"
+            "（tick %s / 乘数 %s / 手续费 %s）——扫描结果口径可能失真",
+            d["symbol"],
+            resolved["tick_size"],
+            resolved["contract_multiplier"],
+            resolved["commission_per_lot"],
+        )
+    else:
+        log.info("品种参数来源：%s → %s", src, resolved)
 
     rows = []
     for combo in _build_grid(grid):
@@ -114,6 +130,18 @@ def main() -> None:
     )
     if heatmap_path:
         log.info("参数扫描热力图已保存：%s", heatmap_path)
+
+    # 图表总览刷新（失败不影响扫描结果）
+    try:
+        overview_paths = build_overview(
+            resolve_path(cfg["output"]["figure_dir"]),
+            resolve_path(cfg["output"]["figure_dir"]).parent,
+        )
+    except Exception:  # noqa: BLE001
+        overview_paths = {}
+        log.warning("图表总览生成失败（不影响扫描结果）", exc_info=True)
+    for ov_name, ov_path in overview_paths.items():
+        log.info("总览已刷新：%s -> %s", ov_name, ov_path)
 
 
 if __name__ == "__main__":

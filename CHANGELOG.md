@@ -10,6 +10,12 @@
 - **图表总览（overview）**：`run_backtest.py` / `run_portfolio.py` 结束时自动刷新 `output/overview.png`（全部分区拼图，一眼扫完）与 `output/overview.html`（单页图表浏览，原尺寸、自包含、可直接分享）；新增手动刷新脚本 `scripts/make_overview.py`。
 - **品种参数全量表（自动生成 + 多源交叉校验）**：新增 `scripts/build_symbol_params.py` —— 按「新浪品种清单 × 主力合约每跳毛利 × 东财合约详情 × openctp 费用表」生成 `config/symbol_params.yaml`（**覆盖 81/82 个品种**，含校验标签 verified / adjusted / fees）；`run_backtest.py` 三层解析（手动覆盖 → 自动全量表 → 默认值 + 醒目告警）——单品种链路换品种**只改 `data.symbol` 一行**，未覆盖品种会告警而非静默算错。
 
+### Fixed
+- **参数扫描口径修复**：`scripts/run_param_scan.py` 接入品种参数三层解析 —— 修复此前扫描不接参数表、用默认（玉米）口径计算一切品种导致的结果失真；未收录品种与单品种链路同样醒目告警。
+
+### Changed
+- 单品种参数解析抽出共享模块 `src/utils/symbol_params.py`（`run_backtest.py` / `run_param_scan.py` 共用，行为不变）；总览拼图每图标注生成日期，参数扫描完成后自动刷新总览。
+
 ## [1.3.0] - 2026-10-10
 
 ### Added

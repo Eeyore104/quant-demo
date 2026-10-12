@@ -1,7 +1,7 @@
 """单品种参数解析测试：三类来源（手动 → 自动全量表 → 默认）与字段补齐。"""
 
-from run_backtest import _DEFAULT_SRC, resolve_symbol_params
 from src.utils.config_loader import load_config, load_symbol_params
+from src.utils.symbol_params import DEFAULT_SRC, apply_symbol_params, resolve_symbol_params
 
 
 def test_manual_overrides_on_top_of_auto():
@@ -25,9 +25,16 @@ def test_auto_table_used_when_no_manual_entry():
 def test_default_fallback_with_source_tag():
     b = load_config()["backtest"]
     params, src = resolve_symbol_params(b, "ZZ0", {})
-    assert src == _DEFAULT_SRC
+    assert src == DEFAULT_SRC
     assert params["tick_size"] == b["tick_size"]
     assert params["contract_multiplier"] == b["contract_multiplier"]
+
+
+def test_apply_writes_back_in_place():
+    b = {"tick_size": 1.0, "contract_multiplier": 10, "commission_per_lot": 1.2}
+    resolved, src = apply_symbol_params(b, "X0", {"X0": {"tick_size": 0.5}})
+    assert src.startswith("自动全量表")
+    assert b["tick_size"] == 0.5 and resolved["tick_size"] == 0.5
 
 
 def test_partial_manual_entry_fills_defaults():

@@ -153,7 +153,9 @@ def build_contact_sheet(
                 ax = fig.add_axes([left, bottom, w, h])
                 ax.imshow(mpimg.imread(e["path"]))
                 ax.set_axis_off()
-                ax.set_title(e["title"], fontsize=9, pad=3, color="#444444")
+                ax.set_title(
+                    f"{e['title']}（{e['mtime']:%m-%d}）", fontsize=9, pad=3, color="#444444"
+                )
             y -= cell_h
 
     out = Path(out_path)
