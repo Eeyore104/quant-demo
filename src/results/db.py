@@ -79,10 +79,15 @@ def _now() -> str:
 
 
 def open_db(db_path: str | Path) -> sqlite3.Connection:
-    """打开（必要时创建）结果库：自动建表 + WAL 模式。"""
+    """打开（必要时创建）结果库：自动建表 + WAL 模式。
+
+    ``check_same_thread=False``：连接允许跨线程使用（看板场景——Streamlit
+    重跑脚本可能发生在不同线程）。本项目 SQLite 为 SERIALIZED 线程模式
+    （``threadsafety == 3``，模块内部自带互斥），跨线程共享连接是安全的。
+    """
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_SCHEMA)

@@ -174,3 +174,24 @@ def test_quality_rows(conn):
     ).fetchall()
     assert len(rows) == 2
     assert rows[1]["status"] == "warn"
+
+
+def test_connection_usable_across_threads(conn):
+    """看板场景：Streamlit 重跑脚本可能在不同线程访问同一连接（check_same_thread=False）。
+
+    修复前此用例会抛 sqlite3.ProgrammingError（线程归属校验）。
+    """
+    import threading
+
+    errors: dict = {}
+
+    def worker():
+        try:
+            db.list_runs(conn)
+        except Exception as exc:  # noqa: BLE001
+            errors["e"] = exc
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    assert "e" not in errors, f"跨线程访问失败：{errors.get('e')}"
