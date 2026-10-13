@@ -18,6 +18,10 @@ def test_parse_hms():
 
 def test_day_session_bounds():
     assert in_day_session(dt.time(9, 0))
+    assert in_day_session(dt.time(10, 15))
+    assert not in_day_session(dt.time(10, 20))  # 盘间小节休息
+    assert not in_day_session(dt.time(10, 29))
+    assert in_day_session(dt.time(10, 30))
     assert in_day_session(dt.time(11, 30))
     assert not in_day_session(dt.time(12, 0))
     assert in_day_session(dt.time(13, 30))
