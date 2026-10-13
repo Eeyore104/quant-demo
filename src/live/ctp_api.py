@@ -248,7 +248,9 @@ class TradeRtn(CtpEvent):
     price: float = 0.0
     volume: int = 0
     trade_id: str = ""
+    trade_date: str = ""
     trade_time: str = ""
+    trading_day: str = ""
 
 
 @dataclass
@@ -697,7 +699,9 @@ class _TdSpi(_tdapi.CThostFtdcTraderSpi if _tdapi else object):  # pragma: no co
                 price=_clean_number(getattr(pTrade, "Price", 0)),
                 volume=int(_clean_number(getattr(pTrade, "Volume", 0))),
                 trade_id=str(getattr(pTrade, "TradeID", "") or ""),
+                trade_date=str(getattr(pTrade, "TradeDate", "") or ""),
                 trade_time=str(getattr(pTrade, "TradeTime", "") or ""),
+                trading_day=str(getattr(pTrade, "TradingDay", "") or ""),
             )
         )
 

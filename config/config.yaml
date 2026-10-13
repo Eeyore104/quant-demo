@@ -171,9 +171,9 @@ schedule:                       # v1.4 每日调度（轮 3 任务计划注册�
   time: "17:00"
   weekday: true                 # 仅工作日注册（节假日由 daily_run 二次判断）
 
-live:                           # v2.0 SimNow 仿真链路（docs/16；默认全关，防误跑）
-  enabled: false                # 总开关
-  dry_run: true                 # 干跑：连行情 / 算信号，不真下单（首跑与联调默认）
+live:                           # v2.0 SimNow 仿真链路（docs/16）
+  enabled: true                 # 总开关（run_live 启动前提；探针 / 检查脚本不受此约束）
+  dry_run: true                 # 干跑：连行情 / 算信号，不真下单（真单需 false + --real 双确认）
   env: "first"                  # 当前环境：first=第一套（盘中）| 724=7×24（研发）
   envs:                         # 前置地址（182.254.243.31；以 SimNow 官网公告为准）
     "first": { md_front: "tcp://182.254.243.31:30011", td_front: "tcp://182.254.243.31:30001" }
