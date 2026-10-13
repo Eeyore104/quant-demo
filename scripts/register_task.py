@@ -97,9 +97,14 @@ $ErrorActionPreference = 'Stop'
 $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/c "{bat}"'
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $trigger.Delay = 'PT2M'
+# 周期自愈：每 30 分钟触发一次（实例在跑时由 IgnoreNew 忽略；失联则自动捞回）
+$rep = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
+    -RepetitionInterval (New-TimeSpan -Minutes 30) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)).Repetition
+$trigger.Repetition = $rep
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries -RestartCount 10 `
-    -RestartInterval (New-TimeSpan -Minutes 5) `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
     -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
     -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName '{LIVE_TASK_NAME}' -Action $action `
@@ -108,7 +113,7 @@ Write-Output 'REGISTERED'
 """
     code = print_result(run_ps(script))
     if code == 0:
-        print(f"已注册任务：{LIVE_TASK_NAME}（登录自启 + 失败重启 + 执行无时限）")
+        print(f"已注册任务：{LIVE_TASK_NAME}（登录自启 + 每 30 分钟自愈 + 失败重启 + 执行无时限）")
         print("提示：真实下单需 config.local.yaml 设 live.dry_run=false（启动器已带 --real）")
         print("提示：保持本机常开且处于登录状态即可满足仿真运行前提")
     return code
