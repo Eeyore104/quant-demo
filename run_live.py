@@ -350,6 +350,7 @@ class LiveRuntime:
     # -------------------------------------------------- 主循环
 
     def run_forever(self) -> None:
+        self.start()  # 状态恢复 + 连接 + 就绪等待 + 订阅 + 会话登记
         last_chase = 0.0
         last_beat = 0.0
         while True:
