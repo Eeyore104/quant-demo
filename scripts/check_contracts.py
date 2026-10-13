@@ -93,14 +93,14 @@ def main() -> int:
     finally:
         md.close()
 
-    print("品种 | 合约 | 行情 | 最新价 | 持仓量 | tick数")
-    print("-" * 64)
+    print("品种 | 合约 | 行情 | 最新价 | 开盘价 | 持仓量 | tick数")
+    print("-" * 72)
     missing: list[str] = []
     for sym, contract in cmap.items():
         t = last.get(contract)
         if t:
             print(
-                f"{sym} | {contract} | OK | {t.last_price} | "
+                f"{sym} | {contract} | OK | {t.last_price} | {t.open_price} | "
                 f"{t.open_interest:.0f} | {count[contract]}"
             )
         else:
@@ -110,7 +110,7 @@ def main() -> int:
         t = last.get(contract)
         if t:
             print(
-                f"(候选) | {contract} | OK | {t.last_price} | "
+                f"(候选) | {contract} | OK | {t.last_price} | {t.open_price} | "
                 f"{t.open_interest:.0f} | {count[contract]}"
             )
         else:
