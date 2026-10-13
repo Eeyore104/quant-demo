@@ -4,6 +4,18 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [2.0.0] - 2026-10-13
+
+### Added
+- **SimNow 仿真链路（v2.0）**：策略在 SimNow 仿真柜台跑通「信号 → 下单 → 成交回报 → 持仓 / 风控 / 对账 / 日报」全链路；**回测引擎与策略零改动**（红线核查 `git diff` 为空）。
+  - **CTP 通道底座**：`src/live/ctp_api.py` —— openctp-ctp（**可选依赖组 `live`**）薄封装：行情 / 交易生命周期、回调 → 线程安全事件队列、认证 → 登录 → 结算确认全链编排、查询流控、断线自动重登；`scripts/probe_simnow.py` 分步连接探针（13 项自检 + 远价挂单冒烟）。
+  - **执行链路六模块**：`orders`（订单状态机 + 本地订单簿 + 成交去重）/ `ledger`（虚拟账本 10 万口径，复用组合引擎账户实现与回测逐项一致）/ `risk_guard`（下单前闸门 + 盘中止损止盈 + 熔断，复用引擎风控组件）/ `signals`（收盘重放 + ATR 入场锁定）/ `adapter`（先平后开 + 上期所平今拆单 + 限价追单）/ `schedule`（日盘 / 夜盘时段）。
+  - **常驻进程**：`run_live.py` —— 事件泵 + 每日执行时点（夜盘 21:00:05）+ 追单 + 日终结算；`--once` 单轮联调模式；dry_run 默认干跑 + `--real` 双确认；账本 / 风控 / 锁定状态持久化（重启不丢）。
+  - **对账**：`src/live/reconcile.py` —— 柜台 vs 本地持仓逐项（今昨分行聚合）+ 权益趋势核对（口径容差）；**实测 3/3 持仓一致、当日盈亏差异 0.66 元**。
+  - **事件流与日报**：`src/live/journal.py` —— jsonl 按日滚动 + 结果库 **6 张 live_* 表**（sessions / orders / fills / positions / equity / events）；每日仿真日报（信号 / 执行 / 成交 / 持仓 / 双账本权益 / 风控 / 对账）落地 + 企微推送（未配置自动降级）。
+  - **守护与工具**：`scripts/register_task.py --live`（开机自启 + 失败重启 + 执行无时限）+ `scripts/live_run.bat`；`scripts/check_contracts.py` 合约映射检查（订阅候选 + 持仓量对比）。
+  - **关键口径实测**：akshare 日线开盘价 = 夜盘 21:00 口径（与 SimNow 实测完全一致，3402.0 = 3402.0）——回测「T+1 开盘价成交」在仿真中精确复现；8 品种主力合约映射实测定稿（AL 修正为 al2611）。
+
 ## [1.4.0] - 2026-10-12
 
 ### Added
