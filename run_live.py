@@ -84,7 +84,7 @@ class LiveRuntime:
         self.state_dir = resolve_path("output/live/state")
         self.exec_date = ""  # 最近一次目标执行的自然日
         self.settle_date = ""  # 最近一次日终结算的自然日
-        self.got_tick_today = False
+        self.tick_date_today = ""  # 最近收到行情 tick 的自然日（判「今日行情已就绪」）
         self.last_tick_ts = 0.0  # 行情心跳监控
         self.last_gap_warn = 0.0
 
@@ -180,7 +180,7 @@ class LiveRuntime:
         if isinstance(ev, Tick):
             symbol = self.instrument_map.get(ev.instrument)
             if symbol and ev.last_price > 0:
-                self.got_tick_today = True
+                self.tick_date_today = self.today()
                 self.last_tick_ts = time.time()
                 self.ledger.account.mark_price(symbol, ev.last_price)
                 self.log_notes(self.executor.on_tick(symbol, ev, date=self.today()))
@@ -357,11 +357,15 @@ class LiveRuntime:
             now = dt.datetime.now()
             t = now.time()
 
-            # 目标执行（每日一次）：每天首次进入交易时段即执行——
-            # 夜盘 21:00 在线（标准口径）即 21:00 执行；夜间离线的运行模式下，
+            # 目标执行（每日一次）：每天首次进入交易时段、且今日行情已就绪（首个 tick 已到）
+            # 即执行——夜盘 21:00 在线（标准口径）即 21:00 执行；夜间离线的运行模式下，
             # 由次日日盘开盘后自动补执行（防重复由 exec_date 标记保证）。
-            if self.exec_date != self.today() and is_trading_time(now, self.symbols):
-                log.info("进入交易时段，开始执行目标仓位……")
+            if (
+                self.exec_date != self.today()
+                and is_trading_time(now, self.symbols)
+                and self.tick_date_today == self.today()
+            ):
+                log.info("进入交易时段且行情就绪，开始执行目标仓位……")
                 try:
                     self.execute_round()
                 except Exception as e:  # noqa: BLE001 - 常驻进程需容错并继续
@@ -390,7 +394,7 @@ class LiveRuntime:
             if (
                 self.settle_date != self.today()
                 and dt.time(15, 5) <= t < dt.time(21, 0)
-                and self.got_tick_today
+                and self.tick_date_today == self.today()
             ):
                 try:
                     self.settle_day()
