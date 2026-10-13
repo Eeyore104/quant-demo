@@ -59,6 +59,7 @@ class VirtualLedger:
         self.prev_equity = float(initial_capital)  # 前一交易日收盘权益
         self.peak_equity = float(initial_capital)  # 历史峰值权益
         self.losing_streak = 0  # 连续亏损笔数（平仓口径）
+        self.last_settle_date = ""  # 最近完成日终结算的自然日（防重复结算）
 
     # -------------------------------------------------- 只读量
 
@@ -256,6 +257,7 @@ class VirtualLedger:
                 "prev_equity": self.prev_equity,
                 "peak_equity": self.peak_equity,
                 "losing_streak": self.losing_streak,
+                "last_settle_date": self.last_settle_date,
             },
         }
 
@@ -290,5 +292,6 @@ class VirtualLedger:
         self.prev_equity = float(stats.get("prev_equity", self.initial_capital))
         self.peak_equity = float(stats.get("peak_equity", self.initial_capital))
         self.losing_streak = int(stats.get("losing_streak", 0))
+        self.last_settle_date = str(stats.get("last_settle_date", ""))
         log.info("账本已恢复：%s（权益 %.2f）", p, self.equity)
         return True

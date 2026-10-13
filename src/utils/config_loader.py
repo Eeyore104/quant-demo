@@ -66,7 +66,10 @@ def resolve_path(rel: str) -> Path:
 
 
 def get_webhook_url(cfg: dict | None = None) -> str | None:
-    """企业微信 webhook URL：环境变量 ``WECOM_WEBHOOK_URL`` > 配置（含本地覆盖）> None。"""
+    """企业微信 webhook URL：环境变量 ``WECOM_WEBHOOK_URL`` > 配置（含本地覆盖）> None。
+
+    模板占位值（``REPLACE_ME``）视为未配置（避免发起无效请求）。
+    """
     env = (os.environ.get("WECOM_WEBHOOK_URL") or "").strip()
     if env:
         return env
@@ -76,4 +79,6 @@ def get_webhook_url(cfg: dict | None = None) -> str | None:
     if not url:
         return None
     url = str(url).strip()
-    return url or None
+    if not url or "REPLACE_ME" in url:
+        return None
+    return url

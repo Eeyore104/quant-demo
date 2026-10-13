@@ -39,11 +39,14 @@ from src.live.ctp_api import (
     Tick,
     TradeRtn,
 )
+from src.live.journal import Journal, build_daily_report, push_report, save_report
 from src.live.ledger import VirtualLedger
 from src.live.orders import OrderBook
+from src.live.reconcile import query_counter, reconcile_all
 from src.live.risk_guard import LiveRiskGuard
 from src.live.schedule import is_trading_time, parse_hms
 from src.live.signals import SignalBridge
+from src.results import db as results_db
 from src.utils import logger as logger_mod
 from src.utils.config_loader import load_config, resolve_path
 from src.utils.logger import get_logger
@@ -78,6 +81,19 @@ class LiveRuntime:
         self.exec_date = ""  # 最近一次目标执行的自然日
         self.settle_date = ""  # 最近一次日终结算的自然日
         self.got_tick_today = False
+        self.last_tick_ts = 0.0  # 行情心跳监控
+        self.last_gap_warn = 0.0
+
+        # 结果库（storage 开关；关闭则仅文件事件流）
+        storage_cfg = cfg.get("storage") or {}
+        self.conn = (
+            results_db.open_db(resolve_path(storage_cfg.get("db_path", "output/db/quant.sqlite3")))
+            if storage_cfg.get("enabled", True)
+            else None
+        )
+        self.session_id = 0
+        self.journal: Journal | None = None
+        self._journaled_orders: set[str] = set()
 
     # -------------------------------------------------- 组装
 
@@ -109,6 +125,20 @@ class LiveRuntime:
         if td is None or not td.ok:
             raise SystemExit("交易登录 / 结算确认失败")
         self.session.subscribe(list(self.instrument_map.keys()))
+        # 会话登记 + 事件流
+        if self.conn is not None:
+            self.session_id = results_db.record_live_session(
+                self.conn,
+                env=str(self.live_cfg.get("env", "first")),
+                mode=("dry_run" if self.dry_run else "live"),
+                meta={"symbols": self.symbols, "only": self.only},
+            )
+        self.journal = Journal(
+            resolve_path("output/live/journal"), conn=self.conn, session_id=self.session_id
+        )
+        self.journal.log(
+            "connect", detail=f"启动：env={self.live_cfg.get('env')} dry_run={self.dry_run}"
+        )
         log.info(
             "仿真就绪：%d 品种（%s）｜ dry_run=%s ｜ 权益 %.2f",
             len(self.symbols),
@@ -120,6 +150,8 @@ class LiveRuntime:
     def close(self) -> None:
         try:
             self.save_state()
+            if self.conn is not None and self.session_id:
+                results_db.close_live_session(self.conn, self.session_id)
         finally:
             self.session.close()
 
@@ -145,12 +177,18 @@ class LiveRuntime:
             symbol = self.instrument_map.get(ev.instrument)
             if symbol and ev.last_price > 0:
                 self.got_tick_today = True
+                self.last_tick_ts = time.time()
                 self.ledger.account.mark_price(symbol, ev.last_price)
                 self.log_notes(self.executor.on_tick(symbol, ev, date=self.today()))
         elif isinstance(ev, (OrderRtn, TradeRtn, OrderRejected, ActionRsp, ActionRejected)):
             self.log_notes(self.executor.on_event(ev))
+            self._journal_trade_event(ev)
         elif isinstance(ev, (MdDisconnected, TdDisconnected)):
-            log.warning("连接断开：%s（轮 3 的自动重连将接管）", ev.kind)
+            log.warning("连接断开：%s（CTP 内置重连 + 回调链重登将自动恢复）", ev.kind)
+            if self.journal is not None:
+                self.journal.log(
+                    "disconnect", detail=f"{ev.kind} reason={getattr(ev, 'reason', '')}"
+                )
         elif isinstance(ev, CtpError) and ev.error_id:
             log.warning("CTP 错误 [%s]：%s %s", ev.source, ev.error_id, ev.error_msg)
 
@@ -160,6 +198,28 @@ class LiveRuntime:
                 log.warning("[%s] %s：%s", n.kind, n.symbol, n.detail)
             else:
                 log.info("[%s] %s：%s", n.kind, n.symbol, n.detail)
+        if self.journal is not None:
+            self.journal.record_notes(notes)
+
+    def _journal_trade_event(self, ev) -> None:
+        """回报入库：成交 → live_fills；订单终态 → live_orders（去重）。"""
+        if self.journal is None:
+            return
+        if isinstance(ev, TradeRtn):
+            symbol = self.instrument_map.get(ev.instrument, "")
+            commission = (
+                self.contracts[symbol].commission_per_lot * int(ev.volume) if symbol else 0.0
+            )
+            self.journal.record_trade(ev, commission=commission)
+        elif isinstance(ev, (OrderRtn, OrderRejected)):
+            order = self.book.get(ev.order_ref)
+            if (
+                order is not None
+                and not order.is_active
+                and order.order_ref not in self._journaled_orders
+            ):
+                self._journaled_orders.add(order.order_ref)
+                self.journal.record_order_terminal(order)
 
     @staticmethod
     def today() -> str:
@@ -174,6 +234,13 @@ class LiveRuntime:
             targets = {s: t for s, t in targets.items() if s in self.only}
             log.info("联调限制品种：%s", "、".join(self.only))
         self.guard.prev_close = dict(self.bridge.last_close)  # 涨跌停判定的前收盘依据
+        if self.journal is not None:
+            for s, t in targets.items():
+                self.journal.log(
+                    "signal",
+                    symbol=s,
+                    detail=f"{s} 信号 {t.signal:+d}，目标 {t.direction:+d}×{t.lots} 手",
+                )
         if self.dry_run:
             log.info("dry_run：目标仓位（不下单）——")
             for s, t in targets.items():
@@ -190,16 +257,89 @@ class LiveRuntime:
         self.exec_date = self.today()
 
     def settle_day(self) -> None:
-        """日终：移动止损更新 + 熔断判定 + 状态落盘。"""
-        res = self.guard.on_day_close(self.today(), atr_map=self.bridge.last_atr)
+        """日终：移动止损 + 熔断 + 对账 + 快照 + 日报。"""
+        date = self.today()
+        if self.ledger.last_settle_date == date:
+            log.info("今日已完成日终结算（%s），跳过", date)
+            return
+        res = self.guard.on_day_close(date, atr_map=self.bridge.last_atr)
         log.info(
             "日终结算：权益 %.2f ｜ 熔断状态 %s ｜ 事件 %d 条",
             self.ledger.equity,
             res["fuse_state"],
             len(res["events"]),
         )
+        ts = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # ① 柜台对账（失败不阻塞日终）
+        counter_equity: float | None = None
+        reconciles: list = []
+        try:
+            snap = query_counter(self.session)
+            if snap.ok:
+                reconciles = reconcile_all(self.ledger, snap)
+                counter_equity = float(snap.account.balance) if snap.account else None
+                if self.conn is not None:
+                    rows = [
+                        {
+                            "instrument": p.instrument,
+                            "direction": ("多" if str(p.posi_direction) == "2" else "空"),
+                            "volume": int(p.position),
+                        }
+                        for p in snap.positions
+                        if p.position > 0
+                    ]
+                    results_db.record_live_positions(self.conn, ts, rows, source="counter")
+            else:
+                log.warning("对账跳过：%s", snap.detail)
+        except Exception as e:  # noqa: BLE001 - 对账失败不阻塞日终
+            log.exception("对账失败（不阻塞日终）：%s", e)
+
+        # ② 本地快照
+        if self.conn is not None:
+            local_rows = []
+            for s in self.symbols:
+                n = self.ledger.net_size(s)
+                if n:
+                    local_rows.append(
+                        {
+                            "instrument": self.ledger.symbol_to_instrument.get(s, s),
+                            "direction": "多" if n > 0 else "空",
+                            "volume": abs(n),
+                            "avg_price": float(self.ledger.state(s).avg_price),
+                        }
+                    )
+            results_db.record_live_positions(self.conn, ts, local_rows, source="local")
+            results_db.record_live_equity(
+                self.conn,
+                ts,
+                nominal_equity=self.ledger.equity,
+                counter_equity=counter_equity or 0.0,
+                margin_used=self.ledger.margin_used,
+                available=self.ledger.available,
+                day_pnl=self.ledger.equity - self.ledger.day_ref_equity,
+            )
+
+        # ③ 日报（构建 → 落地 → 推送）
+        entries = self.journal.entries if self.journal is not None else []
+        md = build_daily_report(
+            date=date,
+            ledger=self.ledger,
+            entries=entries,
+            fuse_state=res["fuse_state"],
+            counter_equity=counter_equity,
+            reconciles=reconciles,
+        )
+        path = save_report(md, resolve_path("output/live/reports"), date)
+        log.info("日报已生成：%s", path)
+        push_report(md)
+        if self.journal is not None:
+            ok_n = sum(1 for r in reconciles if r.match)
+            self.journal.log("reconcile", detail=f"对账 {ok_n}/{len(reconciles)} 项一致")
+
+        self.ledger.last_settle_date = date
         self.save_state()
-        self.settle_date = self.today()
+        self.settle_date = date
 
     # -------------------------------------------------- 主循环
 
@@ -228,6 +368,20 @@ class LiveRuntime:
             if time.time() - last_chase >= 10:
                 self.log_notes(self.executor.process_chase(date=self.today()))
                 last_chase = time.time()
+
+            # 行情心跳：交易时段内超时无 tick → 告警（重连由 CTP 内置 + 回调链重登接管）
+            hb_limit = float(self.live_cfg.get("heartbeat_seconds", 30))
+            if (
+                is_trading_time(now, self.symbols)
+                and self.last_tick_ts > 0
+                and time.time() - self.last_tick_ts > hb_limit
+                and time.time() - self.last_gap_warn > hb_limit
+            ):
+                self.last_gap_warn = time.time()
+                msg = f"行情心跳超时 {time.time() - self.last_tick_ts:.0f}s（限 {hb_limit:.0f}s）"
+                log.warning(msg)
+                if self.journal is not None:
+                    self.journal.log("heartbeat", detail=msg)
 
             # 日终（15:05-21:00 窗口内每日一次；当日需有行情）
             if (

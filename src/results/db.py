@@ -71,6 +71,74 @@ CREATE TABLE IF NOT EXISTS data_quality (
 CREATE INDEX IF NOT EXISTS idx_trades_run    ON trades(run_id);
 CREATE INDEX IF NOT EXISTS idx_events_run    ON risk_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_quality_batch ON data_quality(batch_id);
+
+-- ============ v2.0 仿真链路（live_*，docs/16 §3.9）============
+CREATE TABLE IF NOT EXISTS live_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    start_ts    TEXT NOT NULL,
+    end_ts      TEXT,
+    env         TEXT,                             -- first | 724
+    mode        TEXT,                             -- live | dry_run | once
+    status      TEXT,                             -- running | closed
+    meta_json   TEXT
+);
+CREATE TABLE IF NOT EXISTS live_orders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  INTEGER REFERENCES live_sessions(id),
+    order_ref   TEXT,
+    instrument  TEXT,
+    direction   TEXT,                             -- 业务方向：LONG / SHORT
+    offset      TEXT,                             -- OPEN/CLOSE/CLOSE_TODAY/CLOSE_YESTERDAY
+    price       REAL,
+    volume      INTEGER,
+    status      TEXT,                             -- 本地订单状态（见 live/orders）
+    ts_submit   TEXT,
+    ts_update   TEXT,
+    detail_json TEXT
+);
+CREATE TABLE IF NOT EXISTS live_fills (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  INTEGER REFERENCES live_sessions(id),
+    order_ref   TEXT,
+    trade_id    TEXT,
+    instrument  TEXT,
+    direction   TEXT,
+    offset      TEXT,
+    price       REAL,
+    volume      INTEGER,
+    ts          TEXT,
+    commission  REAL
+);
+CREATE TABLE IF NOT EXISTS live_positions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_ts  TEXT,
+    instrument   TEXT,
+    direction    TEXT,                            -- 多 / 空
+    volume       INTEGER,
+    avg_price    REAL,
+    margin       REAL,
+    source       TEXT                             -- local | counter
+);
+CREATE TABLE IF NOT EXISTS live_equity (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_ts      TEXT,
+    nominal_equity   REAL,                        -- 本地虚拟账本（10 万口径）
+    counter_equity   REAL,                        -- 柜台（2000 万口径）
+    margin_used      REAL,
+    available        REAL,
+    day_pnl          REAL
+);
+CREATE TABLE IF NOT EXISTS live_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  INTEGER REFERENCES live_sessions(id),
+    ts          TEXT,
+    kind        TEXT,                             -- 事件类型（signal / open / fill / …）
+    symbol      TEXT,
+    detail_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_live_orders_session ON live_orders(session_id);
+CREATE INDEX IF NOT EXISTS idx_live_fills_session  ON live_fills(session_id);
+CREATE INDEX IF NOT EXISTS idx_live_events_session ON live_events(session_id);
 """
 
 
@@ -361,3 +429,221 @@ def compare_runs(conn: sqlite3.Connection, run_ids: list[int]) -> list[dict]:
         if run:
             out.append(run)
     return out
+
+
+# ---------------------------------------------------------------- v2.0 仿真（live_*）
+
+
+def record_live_session(
+    conn: sqlite3.Connection,
+    *,
+    env: str,
+    mode: str,
+    start_ts: str | None = None,
+    meta: dict | None = None,
+) -> int:
+    """登记一次仿真会话（进程启动时）；返回 session_id。"""
+    cur = conn.execute(
+        "INSERT INTO live_sessions (start_ts, env, mode, status, meta_json)"
+        " VALUES (?, ?, ?, 'running', ?)",
+        (start_ts or _now(), env, mode, json.dumps(meta or {}, ensure_ascii=False)),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def close_live_session(
+    conn: sqlite3.Connection,
+    session_id: int,
+    *,
+    status: str = "closed",
+    end_ts: str | None = None,
+    meta: dict | None = None,
+) -> None:
+    """关闭仿真会话（进程退出时）。"""
+    if meta is not None:
+        conn.execute(
+            "UPDATE live_sessions SET end_ts = ?, status = ?, meta_json = ? WHERE id = ?",
+            (end_ts or _now(), status, json.dumps(meta, ensure_ascii=False), int(session_id)),
+        )
+    else:
+        conn.execute(
+            "UPDATE live_sessions SET end_ts = ?, status = ? WHERE id = ?",
+            (end_ts or _now(), status, int(session_id)),
+        )
+    conn.commit()
+
+
+def record_live_order(
+    conn: sqlite3.Connection,
+    session_id: int,
+    *,
+    order_ref: str,
+    instrument: str,
+    direction: str,
+    offset: str,
+    price: float,
+    volume: int,
+    status: str,
+    ts_submit: str = "",
+    ts_update: str = "",
+    detail: dict | None = None,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO live_orders (session_id, order_ref, instrument, direction, offset,"
+        " price, volume, status, ts_submit, ts_update, detail_json)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            int(session_id),
+            order_ref,
+            instrument,
+            direction,
+            offset,
+            float(price),
+            int(volume),
+            status,
+            ts_submit,
+            ts_update,
+            json.dumps(detail or {}, ensure_ascii=False),
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def record_live_fill(
+    conn: sqlite3.Connection,
+    session_id: int,
+    *,
+    order_ref: str,
+    trade_id: str,
+    instrument: str,
+    direction: str,
+    offset: str,
+    price: float,
+    volume: int,
+    ts: str,
+    commission: float = 0.0,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO live_fills (session_id, order_ref, trade_id, instrument, direction,"
+        " offset, price, volume, ts, commission) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            int(session_id),
+            order_ref,
+            trade_id,
+            instrument,
+            direction,
+            offset,
+            float(price),
+            int(volume),
+            ts,
+            float(commission),
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def record_live_event(
+    conn: sqlite3.Connection,
+    session_id: int,
+    *,
+    ts: str,
+    kind: str,
+    symbol: str = "",
+    detail: dict | None = None,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO live_events (session_id, ts, kind, symbol, detail_json)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (int(session_id), ts, kind, symbol, json.dumps(detail or {}, ensure_ascii=False)),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def record_live_positions(
+    conn: sqlite3.Connection, snapshot_ts: str, rows: list[dict], *, source: str
+) -> int:
+    """批量登记持仓快照；``rows``：{instrument, direction, volume, avg_price?, margin?}。"""
+    if not rows:
+        return 0
+    conn.executemany(
+        "INSERT INTO live_positions (snapshot_ts, instrument, direction, volume,"
+        " avg_price, margin, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                snapshot_ts,
+                r["instrument"],
+                r["direction"],
+                int(r["volume"]),
+                float(r.get("avg_price", 0.0)),
+                float(r.get("margin", 0.0)),
+                source,
+            )
+            for r in rows
+        ],
+    )
+    conn.commit()
+    return len(rows)
+
+
+def record_live_equity(
+    conn: sqlite3.Connection,
+    snapshot_ts: str,
+    *,
+    nominal_equity: float,
+    counter_equity: float = 0.0,
+    margin_used: float = 0.0,
+    available: float = 0.0,
+    day_pnl: float = 0.0,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO live_equity (snapshot_ts, nominal_equity, counter_equity,"
+        " margin_used, available, day_pnl) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            snapshot_ts,
+            float(nominal_equity),
+            float(counter_equity),
+            float(margin_used),
+            float(available),
+            float(day_pnl),
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def list_live_sessions(conn: sqlite3.Connection, *, limit: int = 50) -> list[dict]:
+    rows = conn.execute("SELECT * FROM live_sessions ORDER BY id DESC LIMIT ?", (int(limit),))
+    return [dict(r) for r in rows]
+
+
+def get_live_orders(conn: sqlite3.Connection, session_id: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM live_orders WHERE session_id = ? ORDER BY id", (int(session_id),)
+    )
+    return [dict(r) for r in rows]
+
+
+def get_live_fills(conn: sqlite3.Connection, session_id: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM live_fills WHERE session_id = ? ORDER BY id", (int(session_id),)
+    )
+    return [dict(r) for r in rows]
+
+
+def get_live_events(conn: sqlite3.Connection, session_id: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM live_events WHERE session_id = ? ORDER BY id", (int(session_id),)
+    )
+    return [dict(r) for r in rows]
+
+
+def latest_live_equity(conn: sqlite3.Connection, *, limit: int = 240) -> list[dict]:
+    """最近的权益快照（跨会话，按时间正序返回）。"""
+    rows = conn.execute(
+        "SELECT * FROM live_equity ORDER BY id DESC LIMIT ?", (int(limit),)
+    )
+    return [dict(r) for r in reversed(list(rows))]
