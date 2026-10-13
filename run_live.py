@@ -8,13 +8,17 @@
 
 主循环（骨架）：
     事件泵（tick → 账本盯市 + 止损监控；回报 → 订单簿 / 账本）→
-    执行时点（每日一次：信号重放 → 目标仓位 → 逐腿风控 → 报单）→
-    追单（周期）→ 日终（15:05 后一次：移动止损 + 熔断判定 + 状态落盘）→
-    心跳输出（10 分钟一次）。
+    目标执行（**每天首次进入交易时段即执行**：夜盘 21:00 在线即 21:00 执行；
+    夜间离线的运行模式下由次日日盘开盘后自动补执行）→
+    追单（周期）→ 日终（15:05 后一次：移动止损 + 熔断判定 + 对账 + 日报 + 状态落盘）→
+    行情心跳监控（交易时段内超时告警）。
+
+    运行窗口说明：夜盘（21:00-23:00）离线时——① 目标执行顺延至次日日盘补执行；
+    ② 该时段止损监控缺失，相关偏差在验收报告如实记录。
 
 安全约定：``live.enabled`` 必须为 true；``dry_run=true`` 时只算信号不下单；
 真实下单需 config ``dry_run=false`` 且命令行 ``--real`` 双重确认。
-断线重连 / 进程守护 / 日报推送属轮 3（T2.0-5），本骨架仅记录断连事件。
+断线重连由 CTP 内置重连 + 回调链重登接管；进程守护由任务计划（--install --live）负责。
 """
 
 import argparse
@@ -44,7 +48,7 @@ from src.live.ledger import VirtualLedger
 from src.live.orders import OrderBook
 from src.live.reconcile import query_counter, reconcile_all
 from src.live.risk_guard import LiveRiskGuard
-from src.live.schedule import is_trading_time, parse_hms
+from src.live.schedule import is_trading_time
 from src.live.signals import SignalBridge
 from src.results import db as results_db
 from src.utils import logger as logger_mod
@@ -183,6 +187,8 @@ class LiveRuntime:
         elif isinstance(ev, (OrderRtn, TradeRtn, OrderRejected, ActionRsp, ActionRejected)):
             self.log_notes(self.executor.on_event(ev))
             self._journal_trade_event(ev)
+            if isinstance(ev, TradeRtn):
+                self.save_state()  # 成交即时落盘（防意外关机 / 断电丢账）
         elif isinstance(ev, (MdDisconnected, TdDisconnected)):
             log.warning("连接断开：%s（CTP 内置重连 + 回调链重登将自动恢复）", ev.kind)
             if self.journal is not None:
@@ -344,7 +350,6 @@ class LiveRuntime:
     # -------------------------------------------------- 主循环
 
     def run_forever(self) -> None:
-        exec_t = parse_hms(str((self.live_cfg.get("execute") or {}).get("time", "21:00:05")))
         last_chase = 0.0
         last_beat = 0.0
         while True:
@@ -352,13 +357,11 @@ class LiveRuntime:
             now = dt.datetime.now()
             t = now.time()
 
-            # 执行时点（每日一次；须处于交易时段）
-            if (
-                self.exec_date != self.today()
-                and t >= exec_t
-                and is_trading_time(now, self.symbols)
-            ):
-                log.info("到达执行时点 %s，开始执行目标仓位……", exec_t)
+            # 目标执行（每日一次）：每天首次进入交易时段即执行——
+            # 夜盘 21:00 在线（标准口径）即 21:00 执行；夜间离线的运行模式下，
+            # 由次日日盘开盘后自动补执行（防重复由 exec_date 标记保证）。
+            if self.exec_date != self.today() and is_trading_time(now, self.symbols):
+                log.info("进入交易时段，开始执行目标仓位……")
                 try:
                     self.execute_round()
                 except Exception as e:  # noqa: BLE001 - 常驻进程需容错并继续
