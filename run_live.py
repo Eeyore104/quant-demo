@@ -423,7 +423,7 @@ class LiveRuntime:
                 last_chase = time.time()
 
             # 行情心跳：交易时段内超时无 tick → 告警（重连由 CTP 内置 + 回调链重登接管）
-            hb_limit = float(self.live_cfg.get("heartbeat_seconds", 30))
+            hb_limit = float(self.live_cfg.get("heartbeat_seconds", 60))
             if (
                 is_trading_time(now, self.symbols)
                 and self.last_tick_ts > 0
@@ -436,11 +436,11 @@ class LiveRuntime:
                 if self.journal is not None:
                     self.journal.log("heartbeat", detail=msg)
 
-            # 日终（15:05-21:00 窗口内每日一次；当日需有行情）
+            # 日终（15:05-21:00 窗口内每日一次；当日有行情、或已过收盘均可）
             if (
                 self.settle_date != self.today()
                 and dt.time(15, 5) <= t < dt.time(21, 0)
-                and self.tick_date_today == self.today()
+                and (self.tick_date_today == self.today() or t >= dt.time(15, 0))
             ):
                 try:
                     self.settle_day()
