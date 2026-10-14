@@ -1,15 +1,2 @@
-# 全仓库统一使用 LF 行尾，消除 CRLF 噪音
-* text=auto eol=lf
-
-# 二进制文件：禁止行尾转换与文本 diff，避免被误处理
-*.png binary
-*.jpg binary
-*.jpeg binary
-*.gif binary
-*.ico binary
-*.pdf binary
-*.xlsx binary
-*.zip binary
-
-# 明确脚本/Hook 使用 LF（跨平台 shell 兼容）
-*.sh text eol=lf
+# Windows 批处理：必须 CRLF（cmd 对 LF 换行在重定向等场景解析失败，实测踩坑）
+*.bat text eol=crlf
