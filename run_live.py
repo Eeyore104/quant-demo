@@ -27,6 +27,7 @@ import sys
 import time
 from pathlib import Path
 
+from src.data import store
 from src.engine.contracts import build_contracts
 from src.live.adapter import Executor
 from src.live.ctp_api import (
@@ -57,6 +58,14 @@ from src.utils.logger import get_logger
 
 log = get_logger("live.run")
 PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def prev_workday(today: dt.date | None = None) -> dt.date:
+    """最近一个工作日（不含今天；仅跳过周末，节假日由数据事实自然兜底）。"""
+    d = (today or dt.date.today()) - dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= dt.timedelta(days=1)
+    return d
 
 
 class LiveRuntime:
@@ -231,10 +240,45 @@ class LiveRuntime:
     def today() -> str:
         return dt.date.today().strftime("%Y-%m-%d")
 
+    # -------------------------------------------------- 数据新鲜度
+
+    def _data_is_fresh(self) -> bool:
+        """clean 数据是否已覆盖「最近一个工作日（不含今天）」的收盘。"""
+        need = prev_workday().isoformat()
+        clean_dir = (self.cfg.get("data") or {}).get("clean_dir", "data/clean")
+        for sym in self.symbols:
+            path = resolve_path(f"{clean_dir}/{sym}_clean.csv")
+            if not path.exists():
+                return False
+            try:
+                last = str(store.load_csv(path)["date"].iloc[-1])[:10]
+            except Exception:  # noqa: BLE001 - 读取异常按「不新鲜」处理
+                return False
+            if last < need:
+                return False
+        return True
+
+    def _ensure_fresh_data(self) -> None:
+        """数据陈旧时自动刷新（复用每日流水线的全区间重拉链；失败不阻塞执行）。"""
+        try:
+            if self._data_is_fresh():
+                return
+            log.info("行情数据陈旧，自动刷新中……")
+            from scripts.daily_run import refresh_data
+
+            refresh_data(self.cfg, self.symbols, log)
+            if self.journal is not None:
+                self.journal.log("data", detail="行情数据已自动刷新")
+        except Exception as e:  # noqa: BLE001 - 刷新失败继续用现有数据
+            log.exception("数据自动刷新失败（继续用现有数据）：%s", e)
+            if self.journal is not None:
+                self.journal.log("data", detail=f"数据刷新失败：{e}")
+
     # -------------------------------------------------- 执行与日终
 
     def execute_round(self) -> None:
         """信号重放 → 目标仓位 → （非干跑时）逐腿执行。"""
+        self._ensure_fresh_data()  # 执行前数据保新（陈旧则自动刷新）
         targets = self.bridge.compute()
         if self.only:
             targets = {s: t for s, t in targets.items() if s in self.only}
@@ -351,6 +395,7 @@ class LiveRuntime:
 
     def run_forever(self) -> None:
         self.start()  # 状态恢复 + 连接 + 就绪等待 + 订阅 + 会话登记
+        self._ensure_fresh_data()  # 启动时数据保新（陈旧则自动刷新）
         last_chase = 0.0
         last_beat = 0.0
         while True:
