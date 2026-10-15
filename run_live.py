@@ -456,7 +456,12 @@ class LiveRuntime:
                 log.info("行情心跳恢复")
                 if self.journal is not None:
                     self.journal.log("heartbeat", detail="行情心跳恢复")
-            elif trading_now and self.last_tick_ts > 0 and gap > hb_limit and not self._gap_reported:
+            elif (
+                trading_now
+                and self.last_tick_ts > 0
+                and gap > hb_limit
+                and not self._gap_reported
+            ):
                 self._gap_reported = True
                 msg = f"行情心跳超时 {gap:.0f}s（限 {hb_limit:.0f}s）"
                 log.warning(msg)
