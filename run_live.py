@@ -482,7 +482,9 @@ class LiveRuntime:
                 else:
                     self._conn_down_since = 0.0
                     if gap > 600:
-                        log.error("行情停滞超过 10 分钟（连接就绪但无 tick），主动退出等待自愈重启")
+                        log.error(
+                            "行情停滞超过 10 分钟（连接就绪但无 tick），主动退出等待自愈重启"
+                        )
                         if self.journal is not None:
                             self.journal.log("connect", detail="行情停滞超 10 分钟，主动退出待自愈")
                         self.save_state()
