@@ -357,6 +357,7 @@ class MdClient:
         self.password = password
         self._api = None
         self._spi = None
+        self._subscribed: list[str] = []  # 订阅记录（断线重连重登后自动重订阅）
 
     def start(self) -> None:
         mdapi, _ = require_ctp()
@@ -374,9 +375,18 @@ class MdClient:
     def subscribe(self, instruments: list[str]) -> None:
         if self._api is None:
             raise RuntimeError("行情接口未启动（先调用 start()）")
+        self._subscribed = list(dict.fromkeys(self._subscribed + list(instruments)))
         codes = [x.encode("utf-8") for x in instruments]
         self._api.SubscribeMarketData(codes, len(codes))
         log.info("已订阅行情：%s", ", ".join(instruments))
+
+    def resubscribe(self) -> None:
+        """重连重登后重新订阅（行情断线恢复的关键一步；无订阅记录时跳过）。"""
+        if self._api is None or not self._subscribed:
+            return
+        codes = [x.encode("utf-8") for x in self._subscribed]
+        self._api.SubscribeMarketData(codes, len(codes))
+        log.info("行情已重新订阅：%s", ", ".join(self._subscribed))
 
     def close(self) -> None:
         if self._api is not None:
@@ -395,6 +405,7 @@ class _MdSpi(_mdapi.CThostFtdcMdSpi if _mdapi else object):  # pragma: no cover
         self._req_seq = itertools.count(1)
 
     def OnFrontConnected(self):
+        log.info("行情前置已连接（%s），登录中……", self.client.front)
         self.client.evq.put(MdConnected(front=self.client.front))
         # 行情登录（SimNow 行情前置需要登录）
         mdapi, _ = require_ctp()
@@ -405,6 +416,7 @@ class _MdSpi(_mdapi.CThostFtdcMdSpi if _mdapi else object):  # pragma: no cover
         self.api.ReqUserLogin(req, next(self._req_seq))
 
     def OnFrontDisconnected(self, nReason):
+        log.warning("行情前置断开（reason=%s），等待 API 自动重连……", nReason)
         self.client.evq.put(MdDisconnected(reason=int(nReason)))
 
     def OnRspUserLogin(self, pRspUserLogin, pRspInfo, nRequestID, bIsLast):
@@ -417,6 +429,11 @@ class _MdSpi(_mdapi.CThostFtdcMdSpi if _mdapi else object):  # pragma: no cover
                 trading_day=str(getattr(pRspUserLogin, "TradingDay", "") or ""),
             )
         )
+        if ok:
+            # 断线重连重登后自动重订阅（否则行情永久静默——实战教训）
+            self.client.resubscribe()
+        else:
+            log.error("行情登录失败：%s %s", eid, emsg)
 
     def OnRtnDepthMarketData(self, pDepthMarketData):
         d = pDepthMarketData
@@ -615,6 +632,7 @@ class _TdSpi(_tdapi.CThostFtdcTraderSpi if _tdapi else object):  # pragma: no co
     # ------------------------------------------------ 连接与登录链
 
     def OnFrontConnected(self):
+        log.info("交易前置已连接（%s），认证中……", self.client.front)
         self.client.evq.put(TdConnected(front=self.client.front))
         tdapi, _ = require_ctp()
         auth = tdapi.CThostFtdcReqAuthenticateField()
@@ -625,6 +643,7 @@ class _TdSpi(_tdapi.CThostFtdcTraderSpi if _tdapi else object):  # pragma: no co
         self.api.ReqAuthenticate(auth, self.client.next_request_id())
 
     def OnFrontDisconnected(self, nReason):
+        log.warning("交易前置断开（reason=%s），等待 API 自动重连……", nReason)
         self.client.evq.put(TdDisconnected(reason=int(nReason)))
 
     def OnRspAuthenticate(self, pRspAuthenticateField, pRspInfo, nRequestID, bIsLast):

@@ -35,12 +35,16 @@ from src.live.ctp_api import (
     ActionRsp,
     CtpError,
     CtpSession,
+    MdConnected,
     MdDisconnected,
     MdLogin,
     OrderRejected,
     OrderRtn,
     SettlementConfirmed,
+    TdAuth,
+    TdConnected,
     TdDisconnected,
+    TdLogin,
     Tick,
     TradeRtn,
 )
@@ -95,7 +99,9 @@ class LiveRuntime:
         self.settle_date = ""  # 最近一次日终结算的自然日
         self.tick_date_today = ""  # 最近收到行情 tick 的自然日（判「今日行情已就绪」）
         self.last_tick_ts = 0.0  # 行情心跳监控
-        self.last_gap_warn = 0.0
+        self._gap_reported = False  # 心跳失联是否已告警（每次失联只报一条 + 恢复一条）
+        self._conn_down_since = 0.0  # 连接失联起始时刻（健康监控）
+        self._was_disconnected = False  # 是否经历过断线（判定「链路恢复」用）
 
         # 结果库（storage 开关；关闭则仅文件事件流）
         storage_cfg = cfg.get("storage") or {}
@@ -200,10 +206,24 @@ class LiveRuntime:
                 self.save_state()  # 成交即时落盘（防意外关机 / 断电丢账）
         elif isinstance(ev, (MdDisconnected, TdDisconnected)):
             log.warning("连接断开：%s（CTP 内置重连 + 回调链重登将自动恢复）", ev.kind)
+            self._was_disconnected = True
             if self.journal is not None:
                 self.journal.log(
                     "disconnect", detail=f"{ev.kind} reason={getattr(ev, 'reason', '')}"
                 )
+        elif isinstance(ev, (MdConnected, TdConnected)):
+            log.info("前置已连接：%s（等待登录完成）", ev.kind)
+        elif isinstance(ev, (MdLogin, TdLogin, TdAuth)):
+            if getattr(ev, "ok", False):
+                log.info("登录成功：%s（交易日 %s）", ev.kind, getattr(ev, "trading_day", ""))
+            else:
+                log.warning("登录失败：%s %s", ev.kind, getattr(ev, "error_msg", ""))
+        elif isinstance(ev, SettlementConfirmed):
+            if ev.ok and self._was_disconnected:
+                self._was_disconnected = False
+                log.info("交易链路已恢复（重连重登完成）")
+                if self.journal is not None:
+                    self.journal.log("connect", detail="交易链路恢复（重连重登完成）")
         elif isinstance(ev, CtpError) and ev.error_id:
             log.warning("CTP 错误 [%s]：%s %s", ev.source, ev.error_id, ev.error_msg)
 
@@ -303,7 +323,12 @@ class LiveRuntime:
                     t.ref_price,
                 )
         else:
-            self.log_notes(self.executor.execute_target(targets, date=self.today()))
+            notes = self.executor.execute_target(targets, date=self.today())
+            self.log_notes(notes)
+            log.info(
+                "目标执行完成：%s",
+                f"{len(notes)} 条执行记录" if notes else "全部品种差额为 0（无调仓）",
+            )
         self.exec_date = self.today()
 
     def settle_day(self) -> None:
@@ -422,19 +447,46 @@ class LiveRuntime:
                 self.log_notes(self.executor.process_chase(date=self.today()))
                 last_chase = time.time()
 
-            # 行情心跳：交易时段内超时无 tick → 告警（重连由 CTP 内置 + 回调链重登接管）
+            # 行情心跳：交易时段内超时告警（每次失联只报一条 + 恢复报一条，避免刷屏）
             hb_limit = float(self.live_cfg.get("heartbeat_seconds", 60))
-            if (
-                is_trading_time(now, self.symbols)
-                and self.last_tick_ts > 0
-                and time.time() - self.last_tick_ts > hb_limit
-                and time.time() - self.last_gap_warn > hb_limit
-            ):
-                self.last_gap_warn = time.time()
-                msg = f"行情心跳超时 {time.time() - self.last_tick_ts:.0f}s（限 {hb_limit:.0f}s）"
+            trading_now = is_trading_time(now, self.symbols)
+            gap = time.time() - self.last_tick_ts if self.last_tick_ts > 0 else 0.0
+            if self._gap_reported and self.last_tick_ts > 0 and gap <= hb_limit:
+                self._gap_reported = False
+                log.info("行情心跳恢复")
+                if self.journal is not None:
+                    self.journal.log("heartbeat", detail="行情心跳恢复")
+            elif trading_now and self.last_tick_ts > 0 and gap > hb_limit and not self._gap_reported:
+                self._gap_reported = True
+                msg = f"行情心跳超时 {gap:.0f}s（限 {hb_limit:.0f}s）"
                 log.warning(msg)
                 if self.journal is not None:
                     self.journal.log("heartbeat", detail=msg)
+
+            # 连接健康：交易时段内失联（断线 / 行情停滞）持续超阈值 → 主动退出交自愈重启
+            if trading_now:
+                conn_down = (not self.session.md_ready) or (not self.session.td_ready)
+                if conn_down:
+                    if self._conn_down_since == 0.0:
+                        self._conn_down_since = time.time()
+                    elif time.time() - self._conn_down_since > 180:
+                        log.error(
+                            "连接失联超过 3 分钟（md_ready=%s td_ready=%s），主动退出等待自愈重启",
+                            self.session.md_ready,
+                            self.session.td_ready,
+                        )
+                        if self.journal is not None:
+                            self.journal.log("connect", detail="连接失联超 3 分钟，主动退出待自愈")
+                        self.save_state()
+                        raise SystemExit(2)
+                else:
+                    self._conn_down_since = 0.0
+                    if gap > 600:
+                        log.error("行情停滞超过 10 分钟（连接就绪但无 tick），主动退出等待自愈重启")
+                        if self.journal is not None:
+                            self.journal.log("connect", detail="行情停滞超 10 分钟，主动退出待自愈")
+                        self.save_state()
+                        raise SystemExit(3)
 
             # 日终（15:05-21:00 窗口内每日一次；当日有行情、或已过收盘均可）
             if (
