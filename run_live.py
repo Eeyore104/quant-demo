@@ -23,6 +23,7 @@
 
 import argparse
 import datetime as dt
+import socket
 import sys
 import time
 from pathlib import Path
@@ -70,6 +71,23 @@ def prev_workday(today: dt.date | None = None) -> dt.date:
     while d.weekday() >= 5:
         d -= dt.timedelta(days=1)
     return d
+
+
+def acquire_single_instance(port: int = 49156) -> socket.socket | None:
+    """单实例互斥：绑定本地回环端口，已被占用（已有实例）则返回 None。
+
+    用于兜底「任务多重触发 / 进程孤儿」场景——无论上游如何重复启动，
+    同一时间只允许一个 run_live 实例。进程退出（含被强杀）时操作系统自动
+    释放端口，不存在「僵尸持锁」问题。
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", port))
+        s.listen(1)
+        return s
+    except OSError:
+        s.close()
+        return None
 
 
 class LiveRuntime:
@@ -336,6 +354,7 @@ class LiveRuntime:
         date = self.today()
         if self.ledger.last_settle_date == date:
             log.info("今日已完成日终结算（%s），跳过", date)
+            self.settle_date = date  # 本进程不再重复尝试（防「跳过」刷屏）
             return
         res = self.guard.on_day_close(date, atr_map=self.bridge.last_atr)
         log.info(
@@ -585,6 +604,12 @@ def main() -> int:
             print("config dry_run=false（真实下单模式）。二次确认：请加 --real 参数显式允许")
             return 1
         dry_run = False
+
+    # 单实例互斥（防任务多重触发 / 进程孤儿导致的多实例并存）
+    lock = acquire_single_instance()
+    if lock is None:
+        print("已有仿真实例在运行（单实例互斥），本次启动退出")
+        return 0
 
     logger_mod.enable_file_logging(PROJECT_ROOT / "logs" / "live")
     log.info(
