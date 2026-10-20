@@ -202,5 +202,7 @@ live:                           # v2.0 SimNow 仿真链路（docs/16）
     quote_timeout_seconds: 5    # 单次挂单等待成交秒数
   signal_time: "17:00"          # 收盘信号计算（与 daily_run 对齐）
   report_time: "15:05"          # 每日日报
-  heartbeat_seconds: 30
+  # 心跳监控：交易时段内连续无 tick 超此时长 → 告警（瞬时稀疏属正常，放宽降噪；
+  # 真正的故障处置由「行情停滞 > 10 分钟 → 主动重启」兜底）
+  heartbeat_seconds: 120
   reconnect_backoff: [5, 10, 30, 60]

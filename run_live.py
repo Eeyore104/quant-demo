@@ -432,6 +432,7 @@ class LiveRuntime:
             self.journal.log("reconcile", detail=f"对账 {ok_n}/{len(reconciles)} 项一致")
 
         self.ledger.last_settle_date = date
+        self.ledger.day_idx += 1  # 结算推进运行交易日序号（止损 entry_row 的 armed 基准）
         self.save_state()
         self.settle_date = date
 
