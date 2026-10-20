@@ -1,17 +1,19 @@
-# quant-demo · 个人量化交易 Demo（期货回测最小闭环）
+# quant-demo · 个人量化交易 Demo（回测 → SimNow 仿真）
 
 ![CI](https://github.com/Eeyore104/quant-demo/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
-![Tests](https://img.shields.io/badge/tests-106%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-227%20passed-brightgreen)
 ![Market](https://img.shields.io/badge/market-China%20Futures-C8102E)
-![Status](https://img.shields.io/badge/status-v1.3%20done-success)
+![Status](https://img.shields.io/badge/status-v2.0%20done-success)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 > 一个结构清晰、可一键运行、能产出专业回测报告的**个人期货量化研究项目**。
 >
 > 第一阶段目标：**回测最小闭环** —— 数据获取 → 清洗 → 策略 → 回测（含手续费/滑点）→ 绩效报告 → 参数对比。
 >
-> *A minimal, reproducible backtesting framework for China futures markets.*
+> 第二阶段（v2.0）：**SimNow 仿真链路** —— 同一套策略直连仿真柜台，**5 个交易日无人值守验收通过**（自动执行 / 日终对账 / 每日日报）。
+>
+> *A minimal, reproducible backtesting framework — and a live-trading simulator for China futures.*
 
 ---
 
@@ -91,7 +93,9 @@ uv run python scripts/register_task.py --install
 uv sync --extra live                              # 安装仿真依赖（openctp-ctp）
 uv run python scripts/probe_simnow.py --env first # 连接探针（分步自检 13 项）
 uv run python run_live.py --once --dry            # 单轮联调（干跑：算信号 / 不下单）
-uv run python scripts/register_task.py --install --live   # 仿真守护（开机自启 + 失败重启）
+uv run python scripts/register_task.py --install --live   # 仿真守护（登录自启 + 5 分钟自愈 + 单实例锁）
+# 日常观测：每日日报 output/live/reports/sim_YYYYMMDD.md（对账 4/4 + 信号/成交/持仓）
+#          事件流 output/live/journal/live_YYYYMMDD.jsonl ｜ 运行日志 logs/live/
 ```
 
 跑完在 `output/` 下得到：权益曲线图、买卖点图、回撤区间图、月度收益热力图、参数邻域热力图、蒙特卡洛对照图、成本敏感性图，以及绩效报告（含成本明细、**样本外验证对比表**与**过拟合体检**）。
@@ -123,7 +127,7 @@ uv run pytest                             # 单元测试
 - **风控体系（v1.3）**：**ATR 风险预算**头寸（单笔风险 1.5% · 入场锁定）+ **止损止盈**（固定 2×ATR / 移动 3×ATR · 盘中触价口径 · 跳空按开盘价）+ **组合熔断**三级阶梯（暂停 / 减半 / 冷却恢复 · 全平开关）+ **敞口上限** + **涨跌停方向感知**（跌停「止不掉」如实呈现）+ 参与率上限 + 资金不足**降级执行**——全部配置化开关；报告含「风险与压力测试」章节（压力测试 / VaR / 集中度 / 相关性预警）与风控开/关对比
 - **研究严谨**：内置**样本外验证**（训练段参数择优 → 测试段检验）+ **过拟合体检（v1.1）**——参数邻域细检（悬崖 / 孤峰）、蒙特卡洛对照（信号重排 + Bootstrap）、成本敏感性（收益归零倍数）、Deflated Sharpe 校正、样本外使用次数登记；报告输出逐项判定（通过 / 存疑 / 不通过）与总判定，主动暴露过拟合
 - **报告层**：10 项绩效指标 + 权益曲线 / 买卖点 / 回撤区间 / 月度收益热力图 / 参数扫描热力图（PNG）+ 参数扫描对比表
-- **SimNow 仿真链路（v2.0）**：CTP 通道（openctp-ctp · 可选依赖组 `live`）——`run_live.py` 常驻进程跑通「**信号 → 下单 → 成交回报 → 持仓 / 风控 → 日报**」全链路；**双账本**设计（SimNow 柜台执行 + 本地虚拟账本 10 万口径）持仓 / 权益逐日对账；**引擎与策略零改动**（与回测共用同一套策略与手数 / 熔断 / 止损口径，成交价由 SimNow 真实撮合）；dry_run 默认干跑 + `--real` 双确认；守护任务（开机自启 + 失败重启）
+- **SimNow 仿真链路（v2.0）**：CTP 通道（openctp-ctp · 可选依赖组 `live`）——`run_live.py` 常驻进程跑通「**信号 → 下单 → 成交回报 → 持仓 / 风控 → 日报**」全链路；**双账本**设计（SimNow 柜台执行 + 本地虚拟账本 10 万口径）持仓 / 权益逐日对账；**引擎与策略零改动**（与回测共用同一套策略与手数 / 熔断 / 止损口径，成交价由 SimNow 真实撮合）；dry_run 默认干跑 + `--real` 双确认；守护任务（登录自启 + 失败重启 + 5 分钟级自愈 + 单实例锁）——**2026-10-14 ~ 10-20 连续 5 个交易日无人值守验收通过**（详见 `docs/18`）
 - **执行层**：`ExecutionAdapter` 抽象接口（v1.0 预留）→ **v2.0 由 `src/live/` 仿真链路落地**（策略代码不改）
 - **工程化与看板（v1.4）**：**结果库**（SQLite 归档历次回测 / 交易明细 / 风控事件 / 数据质量批次）· **自包含 HTML 报告**（每次回测一份，单文件可直接发送）· **数据质量校验**（缺口 / 异常 / 新鲜度 / 跨品种对齐 + 逐条排查提示）· **Streamlit 看板**（历史一览 / 单次详情 / 多项对比 · 可选依赖）· **每日流水线 + Windows 定时任务 + 企业微信告警**（数据更新 → 跑批 → 报告 → 通知一条龙）
 - **工程化**：uv 依赖管理 · ruff 代码规范 · pytest 单元测试 · GitHub Actions CI · `config.yaml` 配置驱动（改参数不碰代码）
@@ -199,7 +203,7 @@ quant-demo/
 - [x] **v1.2 组合引擎**：多品种并行 + 共享资金池（保证金约束 + 拒绝开仓事件）+ 组合报告（相关性 / 贡献 / 保证金占用）
 - [x] **v1.3 风控体系**：ATR 风险预算 + 止损止盈（盘中触价）+ 组合熔断三级阶梯 + 压力测试 + 风险指标 + 涨跌停/流动性约束；报告含「风险与压力测试」章节与风控开/关对比
 - [x] **v1.4 工程化与看板**：结果库（SQLite）+ 数据质量校验 + 自包含 HTML 报告 + Streamlit 看板 + 每日流水线（数据更新 → 跑批 → 报告 → 通知）+ Windows 定时任务 + 企业微信告警
-- [x] **v2.0 SimNow 仿真链路**：CTP 通道接入（openctp-ctp）· 信号 → 下单 → 成交回报 → 持仓 / 风控 → 日报全链路 · 双账本对账 · 守护任务（连续多交易日无人值守 = 正式验收进行中）
+- [x] **v2.0 SimNow 仿真链路**：CTP 通道接入（openctp-ctp）· 信号 → 下单 → 成交回报 → 持仓 / 风控 → 日报全链路 · 双账本对账 · 守护任务——**2026-10-20 连续 5 交易日无人值守验收通过**（对账 5×4/4，权益趋势偏差恒定 0.65 元）
 - [ ] **M8–M9 Web 看板 + 实盘准备**：可视化看板、风控模块、程序化交易报备后小资金实盘
 
 ## 合规提示（重要）
@@ -231,6 +235,7 @@ quant-demo/
 | `docs/15-验收报告-v1.4.md` | v1.4 QA 验收报告（含 CI 复验） |
 | `docs/16-增量设计与任务列表-v2.0.md` | v2.0 SimNow 仿真链路设计（8 项锁定 + 3 轮实施） |
 | `docs/17-验收报告-v2.0-轮1.md` | v2.0 轮 1 QA 验收报告（通道底座 + 口径闭环） |
+| `docs/18-验收报告-v2.0.md` | **v2.0 验收报告（5 交易日无人值守 · 判定通过）** |
 
 ## 许可证
 
