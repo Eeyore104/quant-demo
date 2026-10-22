@@ -135,7 +135,11 @@ class SignalBridge:
     # -------------------------------------------------- 持久化（latch）
 
     def to_dict(self) -> dict:
-        return {"latch": dict(self.latch)}
+        return {
+            "latch": dict(self.latch),
+            "last_atr": dict(self.last_atr),
+            "last_close": dict(self.last_close),
+        }
 
     def load(self, path) -> bool:
         p = Path(path)
@@ -143,6 +147,9 @@ class SignalBridge:
             return False
         d = json.loads(p.read_text(encoding="utf-8"))
         self.latch = {k: int(v) for k, v in (d.get("latch") or {}).items()}
+        # v2.1：ATR / 前收盘持久化（重启后启动补建与涨跌停判定不再依赖当日重放）
+        self.last_atr = {k: float(v) for k, v in (d.get("last_atr") or {}).items()}
+        self.last_close = {k: float(v) for k, v in (d.get("last_close") or {}).items()}
         return True
 
     def save(self, path) -> None:

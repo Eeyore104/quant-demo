@@ -73,6 +73,39 @@ def prev_workday(today: dt.date | None = None) -> dt.date:
     return d
 
 
+def parse_force_targets(text: str, symbols: list[str]) -> dict[str, int]:
+    """解析联调参数 ``M0=+1,RB0=-2`` → {品种: 带符号手数}（v2.1 · 仅 --once 使用）。"""
+    out: dict[str, int] = {}
+    allowed = {s.upper() for s in symbols}
+    for part in str(text or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        sym, sep, raw = part.partition("=")
+        if not sep:
+            raise ValueError(f"格式应为「品种=手数」，如 M0=+1：{part}")
+        sym = sym.strip().upper()
+        if sym not in allowed:
+            raise ValueError(f"品种 {sym} 不在 live.contracts_map 中")
+        try:
+            out[sym] = int(raw.strip())
+        except ValueError as exc:
+            raise ValueError(f"手数须为整数：{part}") from exc
+    return out
+
+
+def advance_day(ledger, guard) -> None:
+    """日终状态推进（在结算与日报之后调用，顺序与回测主循环一致）。
+
+    ① 交易日序 +1（止损 ``entry_row`` 的 armed 基准）；
+    ② 次日「开盘前权益」= 当前权益（日报 ``day_pnl`` 的单日基准）；
+    ③ 清「当日止损」标记（否则一次止损后该品种永久禁止开仓）。
+    """
+    ledger.day_idx += 1
+    ledger.day_ref_equity = ledger.equity
+    guard.new_day()
+
+
 def acquire_single_instance(port: int = 49156) -> socket.socket | None:
     """单实例互斥：绑定本地回环端口，已被占用（已有实例）则返回 None。
 
@@ -93,11 +126,19 @@ def acquire_single_instance(port: int = 49156) -> socket.socket | None:
 class LiveRuntime:
     """仿真运行器：组装组件 + 事件泵 + 时点调度 + 状态持久化。"""
 
-    def __init__(self, cfg: dict, *, dry_run: bool, only: list[str] | None = None):
+    def __init__(
+        self,
+        cfg: dict,
+        *,
+        dry_run: bool,
+        only: list[str] | None = None,
+        force_targets: dict[str, int] | None = None,
+    ):
         self.cfg = cfg
         self.live_cfg = dict(cfg.get("live") or {})
         self.dry_run = dry_run
         self.only = [str(x) for x in (only or [])]  # 联调限制品种（空 = 全部）
+        self.force_targets = dict(force_targets or {})  # 联调覆盖目标仓位（仅 --once）
 
         self.contracts = build_contracts(cfg["portfolio"]["contracts"])
         cmap = dict(self.live_cfg.get("contracts_map") or {})
@@ -176,6 +217,8 @@ class LiveRuntime:
         self.journal.log(
             "connect", detail=f"启动：env={self.live_cfg.get('env')} dry_run={self.dry_run}"
         )
+        self._backfill_stops()  # v2.1：持仓有、状态无 → 补建（立即受保护）
+        self._warn_settle_missed()  # v2.1：漏结算告警（不自动补做，避免跨日口径静默失真）
         log.info(
             "仿真就绪：%d 品种（%s）｜ dry_run=%s ｜ 权益 %.2f",
             len(self.symbols),
@@ -196,6 +239,38 @@ class LiveRuntime:
         self.ledger.save(self.state_dir / "ledger.json")
         self.guard.save(self.state_dir / "risk.json")
         self.bridge.save(self.state_dir / "signal_state.json")
+
+    # -------------------------------------------------- v2.1 状态补建
+
+    def _backfill_stops(self) -> None:
+        """启动补建：持仓在手但止损状态缺失 → 按账本均价 + 最近 ATR 重建。
+
+        ``row_idx = day_idx - 1`` 把既有持仓视为「昨日入场」→ 补建后**立即受保护**；
+        若价格已越过止损位，下一 tick 即平仓——这是正确暴露，记 ``stop_backfill`` 事件。
+        """
+        self.guard.atr_hint = dict(self.bridge.last_atr)
+        date = self.today()
+        for symbol in self.symbols:
+            if self.ledger.net_size(symbol) == 0 or self.guard.stop_state(symbol) is not None:
+                continue
+            for ev in self.guard.sync_stops(
+                symbol, row_idx=self.ledger.day_idx - 1, date=date
+            ):
+                log.warning("启动补建：%s", ev.describe())
+                if self.journal is not None:
+                    self.journal.log("stop_backfill", symbol=symbol, detail=ev.detail)
+
+    def _warn_settle_missed(self) -> None:
+        """上次结算落后于上一工作日 → 记事件（day_pnl / 冷却天数按跨日口径）。"""
+        last = self.ledger.last_settle_date
+        if not last:
+            return
+        need = prev_workday().isoformat()
+        if last < need:
+            msg = f"上次结算 {last} 落后于上一工作日 {need}（当日盈亏按跨日口径）"
+            log.warning("漏结算：%s", msg)
+            if self.journal is not None:
+                self.journal.log("settle_missed", detail=msg)
 
     # -------------------------------------------------- 事件泵
 
@@ -322,6 +397,16 @@ class LiveRuntime:
             targets = {s: t for s, t in targets.items() if s in self.only}
             log.info("联调限制品种：%s", "、".join(self.only))
         self.guard.prev_close = dict(self.bridge.last_close)  # 涨跌停判定的前收盘依据
+        self.guard.atr_hint = dict(self.bridge.last_atr)  # 止损注册的 ATR（截至信号日收盘）
+        for s in targets:
+            if self.ledger.net_size(s) != 0:  # 每日对账式校准（补 ATR / 校准加仓均价）
+                for risk_ev in self.guard.sync_stops(s, date=self.today()):
+                    if risk_ev.kind != "stop_update":
+                        log.info("止损状态校准：%s", risk_ev.describe())
+        for s, t in targets.items():
+            self.guard.update_signal(s, t.signal)  # 释放 signal_reset 锁定（回测每日调用）
+        if self.force_targets:
+            self._apply_force_targets(targets)
         if self.journal is not None:
             for s, t in targets.items():
                 self.journal.log(
@@ -348,6 +433,17 @@ class LiveRuntime:
                 f"{len(notes)} 条执行记录" if notes else "全部品种差额为 0（无调仓）",
             )
         self.exec_date = self.today()
+
+    def _apply_force_targets(self, targets: dict) -> None:
+        """联调覆盖目标仓位（保留原 ``signal`` 供重入锁定释放；仅 --once 使用）。"""
+        for symbol, signed in self.force_targets.items():
+            tp = targets.get(symbol)
+            if tp is None:
+                log.warning("force_target：品种 %s 无目标仓位（检查 only / 配置）", symbol)
+                continue
+            tp.direction = 1 if signed > 0 else (-1 if signed < 0 else 0)
+            tp.lots = abs(int(signed))
+            log.info("force_target 覆盖：%s → %+d × %d 手", symbol, tp.direction, tp.lots)
 
     def settle_day(self) -> None:
         """日终：移动止损 + 熔断 + 对账 + 快照 + 日报。"""
@@ -432,7 +528,7 @@ class LiveRuntime:
             self.journal.log("reconcile", detail=f"对账 {ok_n}/{len(reconciles)} 项一致")
 
         self.ledger.last_settle_date = date
-        self.ledger.day_idx += 1  # 结算推进运行交易日序号（止损 entry_row 的 armed 基准）
+        advance_day(self.ledger, self.guard)  # day_idx+1 → 次日基准 → 清「当日止损」
         self.save_state()
         self.settle_date = date
 
@@ -588,6 +684,12 @@ def main() -> int:
         "--real", action="store_true", help="真实下单二次确认（须 config dry_run=false）"
     )
     parser.add_argument("--dry", action="store_true", help="强制干跑（不下单）")
+    parser.add_argument(
+        "--force-target",
+        default="",
+        metavar="M0=+1,RB0=-2",
+        help="联调覆盖目标仓位（仅与 --once 同用；走完整下单链路）",
+    )
     args = parser.parse_args()
 
     cfg = load_config()
@@ -607,6 +709,18 @@ def main() -> int:
         dry_run = False
 
     # 单实例互斥（防任务多重触发 / 进程孤儿导致的多实例并存）
+    force: dict[str, int] = {}
+    if args.force_target:
+        if not args.once:
+            print("--force-target 仅允许与 --once 同时使用（防误用）")
+            return 1
+        try:
+            force = parse_force_targets(
+                args.force_target, [str(k) for k in (live_cfg.get("contracts_map") or {})]
+            )
+        except ValueError as e:
+            print(f"--force-target 解析失败：{e}")
+            return 1
     lock = acquire_single_instance()
     if lock is None:
         print("已有仿真实例在运行（单实例互斥），本次启动退出")
@@ -619,7 +733,7 @@ def main() -> int:
         dry_run,
         "联调单轮" if args.once else "常驻",
     )
-    rt = LiveRuntime(cfg, dry_run=dry_run, only=args.only)
+    rt = LiveRuntime(cfg, dry_run=dry_run, only=args.only, force_targets=force)
     try:
         if args.once:
             rt.run_once(wait_seconds=args.wait)

@@ -61,6 +61,8 @@ class LiveRiskGuard:
         self.ledger = ledger
         self.manager = RiskManager(self.cfg, contracts)
         self.prev_close: dict[str, float] = {k: float(v) for k, v in (prev_close or {}).items()}
+        # 最近一次信号重放得到的 ATR（截至信号日收盘；与回测 register_entry 同源）
+        self.atr_hint: dict[str, float] = {}
 
     # -------------------------------------------------- 下单前闸门
 
@@ -161,6 +163,60 @@ class LiveRiskGuard:
                 RiskEvent(date, "limit_refuse", symbol, f"{tag}：拒绝平仓方向 {direction}")
             ]
         return lots, [], []
+
+    # -------------------------------------------------- 止损状态同步（v2.1）
+
+    def sync_stops(
+        self, symbol: str, row_idx: int | None = None, *, date: str = ""
+    ) -> list[RiskEvent]:
+        """成交后同步止损状态（对齐回测 ``portfolio_engine.register_entry_stops``）。
+
+        三分支语义（必须逐笔成交后调用，不能只在开仓时调用）：
+        - 持仓归零 → 清除状态（普通调仓平仓也要清，否则残留会成为下次开仓的「旧止损位」）；
+        - 无状态 / 方向变更 → 按账本均价与 ``atr_hint`` 建立；
+        - 同向仍持仓 → 按新均价重估固定止损（加仓）。
+        """
+        row = self.ledger.day_idx if row_idx is None else int(row_idx)
+        pos = self.ledger.net_size(symbol)
+        events: list[RiskEvent] = []
+
+        if pos == 0:
+            if self.manager.stops.state(symbol) is not None:
+                self.manager.stops.clear(symbol)
+                events.append(RiskEvent(date, "stop_clear", symbol, "持仓归零 → 清除止损状态"))
+            return events
+
+        direction = 1 if pos > 0 else -1
+        avg = float(self.ledger.state(symbol).avg_price)
+        st = self.manager.stops.state(symbol)
+        atr = float(self.atr_hint.get(symbol, 0.0) or 0.0)
+        if st is not None and st.direction == direction and st.atr_entry > 0:
+            self.manager.stops.update_entry(symbol, avg)
+            events.append(RiskEvent(date, "stop_update", symbol, f"加仓重估：均价 {avg:.4f}"))
+            return events
+
+        # 新建 / 反向重建 / ATR 补全（保留原基准日，避免 armed 被重置）
+        entry_row = row if (st is None or st.direction != direction) else st.entry_row
+        self.manager.stops.register_entry(symbol, direction, avg, atr, entry_row)
+        if atr > 0:
+            events.append(
+                RiskEvent(
+                    date,
+                    "stop_register",
+                    symbol,
+                    f"建立止损：{direction:+d} @ {avg:.4f}，ATR {atr:.4f}，基准日 {entry_row}",
+                )
+            )
+        else:
+            events.append(
+                RiskEvent(
+                    date,
+                    "stop_register_no_atr",
+                    symbol,
+                    f"建立止损但 ATR 缺失（仅止盈可用）：{direction:+d} @ {avg:.4f}",
+                )
+            )
+        return events
 
     # -------------------------------------------------- 盘中止损止盈
 

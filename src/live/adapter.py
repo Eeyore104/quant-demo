@@ -274,6 +274,14 @@ class Executor:
                     out.append(
                         ExecNote("error", ev.instrument, f"成交入账失败：{e}", ev.order_ref)
                     )
+                else:
+                    # v2.1：逐笔成交后同步止损状态（对齐回测 register_entry_stops 三分支）
+                    symbol = self.ledger.instrument_map.get(ev.instrument)
+                    if symbol:
+                        for risk_ev in self.guard.sync_stops(
+                            symbol, date=str(ev.trading_day or "")
+                        ):
+                            out.append(ExecNote("risk", symbol, risk_ev.detail))
             if order is not None:
                 out.extend(self._after_terminal(order, ev.ts))
         elif isinstance(ev, OrderRejected):
