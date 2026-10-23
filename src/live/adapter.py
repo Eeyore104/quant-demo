@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from ..engine.risk import StopTrigger
@@ -34,7 +35,7 @@ from .ctp_api import (
     TradeRtn,
 )
 from .ledger import VirtualLedger
-from .orders import ST_CANCELED, ST_FILLED, ST_REJECTED, LiveOrder, OrderBook
+from .orders import ST_CANCELED, ST_FILLED, ST_PENDING, ST_REJECTED, LiveOrder, OrderBook
 from .risk_guard import LiveRiskGuard
 
 log = get_logger("live.adapter")
@@ -111,6 +112,8 @@ class Executor:
         self.stop_orders: set[str] = set()  # 止损单标记
         self.pending_stop: set[str] = set()  # 止损在途的品种
         self.chase_pending: set[str] = set()  # 已请求撤单、待重挂的订单
+        self.no_ack_reported: set[str] = set()  # 已告警「无回执」的订单（每单一次）
+        self.ack_timeout = float(self.execute_cfg.get("ack_timeout_seconds", 10))
         self.notes: list[ExecNote] = []
 
     # -------------------------------------------------- 目标执行
@@ -215,6 +218,7 @@ class Executor:
     def process_chase(self, now: float | None = None, date: str = "") -> list[ExecNote]:
         """超时未全成订单：撤单重挂（最多 chase_max 次）；超次撤单放弃。"""
         out: list[ExecNote] = []
+        out.extend(self._check_unacked(now))  # v2.1：报单回执超时告警（防静默丢单）
         timeout = float(self.execute_cfg.get("quote_timeout_seconds", 5))
         chase_max = int(self.execute_cfg.get("chase_max", 3))
         for order in self.book.stale_orders(timeout, now):
@@ -244,6 +248,31 @@ class Executor:
                 )
             )
         self.notes.extend(out)
+        return out
+
+    def _check_unacked(self, now: float | None = None) -> list[ExecNote]:
+        """报单回执超时告警（v2.1）：pending 长期无 OrderRtn → 记 no_ack，每单一次。
+
+        背景：2026-10-23 09:00 首单报出后既无回执也无成交，`stale_orders` 只覆盖
+        accepted/partial，导致静默丢单。本方法补上「未受理」这一档的可见性。
+        """
+        now = time.time() if now is None else now
+        out: list[ExecNote] = []
+        for order in self.book.active_orders():
+            if order.status != ST_PENDING or order.order_ref in self.no_ack_reported:
+                continue
+            if now - order.created_ts < self.ack_timeout:
+                continue
+            self.no_ack_reported.add(order.order_ref)
+            out.append(
+                ExecNote(
+                    "no_ack",
+                    order.symbol,
+                    f"报单 {self.ack_timeout:.0f}s 无回执（{order.direction} {order.offset} "
+                    f"{order.volume} 手 @{order.price:.4f}）——检查交易登录 / 柜台状态",
+                    order.order_ref,
+                )
+            )
         return out
 
     # -------------------------------------------------- 回报分发
@@ -327,6 +356,7 @@ class Executor:
         terminal = order.status in (ST_FILLED, ST_CANCELED, ST_REJECTED)
         if not terminal:
             return out
+        chased_stop = False  # 追单重挂后是否仍为「止损单在途」（需继续保持防重）
         # 追单重挂（撤单成功 → 以新价重挂剩余量）
         if order.order_ref in self.chase_pending:
             self.chase_pending.discard(order.order_ref)
@@ -335,33 +365,39 @@ class Executor:
             ) and order.remaining > 0:
                 pending_stop = order.order_ref in self.stop_orders
                 direction = order.direction
-                price = self._quote_price(order.symbol, direction, chase=order.chase_count + 1)
                 try:
+                    price = self._quote_price(
+                        order.symbol, direction, chase=order.chase_count + 1
+                    )
                     new_ref = self._submit(
                         order.symbol, order.instrument, direction, order.offset,
                         price, order.remaining, chase_count=order.chase_count + 1,
                     )
-                except Exception as e:  # 极端情形：会话不可用
+                except Exception as e:  # 无行情快照 / 会话不可用：不中断主循环，下轮重试
                     out.append(
                         ExecNote("error", order.symbol, f"追单重挂失败：{e}", order.order_ref)
                     )
-                    return out
-                if pending_stop:
-                    self.stop_orders.add(new_ref)
-                out.append(
-                    ExecNote(
-                        "chase",
-                        order.symbol,
-                        f"追价重挂 {order.remaining} 手 @{price:.4f}"
-                        f"（第 {order.chase_count + 1} 次）",
-                        new_ref,
+                else:
+                    if pending_stop:
+                        self.stop_orders.add(new_ref)
+                        chased_stop = True
+                    out.append(
+                        ExecNote(
+                            "chase",
+                            order.symbol,
+                            f"追价重挂 {order.remaining} 手 @{price:.4f}"
+                            f"（第 {order.chase_count + 1} 次）",
+                            new_ref,
+                        )
                     )
-                )
         # 止损单收尾：全成 → 清止损监控 + 登记重入锁定（对齐回测 execute_stop）；
         # 未成（拒单 / 放弃撤单）→ 仅释放防重标记，监控保留（下个 tick 重试）
         if order.order_ref in self.stop_orders:
             self.stop_orders.discard(order.order_ref)
             self.pending_stop.discard(order.symbol)
+            if chased_stop:
+                # v2.1：追单已重挂 → 继续防重，否则新旧两单会同时在场（10-23 报单 30 连环拒）
+                self.pending_stop.add(order.symbol)
             if order.status == ST_FILLED:
                 direction = 1 if order.direction == "LONG" else -1
                 self.guard.notify_stop(order.symbol, direction)

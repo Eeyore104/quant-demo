@@ -1,2 +1,4 @@
 # Windows 批处理：必须 CRLF（cmd 对 LF 换行在重定向等场景解析失败，实测踩坑）
 *.bat text eol=crlf
+# PowerShell 脚本同样按 CRLF 落地（PS 5.1 对续行/编码更敏感）
+*.ps1 text eol=crlf

@@ -161,6 +161,8 @@ class LiveRuntime:
         self._gap_reported = False  # 心跳失联是否已告警（每次失联只报一条 + 恢复一条）
         self._conn_down_since = 0.0  # 连接失联起始时刻（健康监控）
         self._was_disconnected = False  # 是否经历过断线（判定「链路恢复」用）
+        self._trading_prev = False  # 上一轮是否处于交易时段（识别时段起点）
+        self._td_wait_reported = False  # 「交易未登录、暂缓执行」是否已告警
 
         # 结果库（storage 开关；关闭则仅文件事件流）
         storage_cfg = cfg.get("storage") or {}
@@ -549,8 +551,19 @@ class LiveRuntime:
             # 由次日日盘开盘后自动补执行（防重复由 exec_date 标记保证）。
             if (
                 self.exec_date != self.today()
+                and self.tick_date_today == self.today()
+                and is_trading_time(now, self.symbols)
+                and not self.session.td_ready
+                and not self._td_wait_reported
+            ):
+                # v2.1：只有行情就绪不够——交易未登录时报单会静默丢失（10-23 09:00 实证）
+                log.warning("行情已就绪但交易通道未登录，暂缓执行目标仓位")
+                self._td_wait_reported = True
+            if (
+                self.exec_date != self.today()
                 and is_trading_time(now, self.symbols)
                 and self.tick_date_today == self.today()
+                and self.session.td_ready
             ):
                 log.info("进入交易时段且行情就绪，开始执行目标仓位……")
                 try:
@@ -566,6 +579,12 @@ class LiveRuntime:
             # 行情心跳：交易时段内超时告警（每次失联只报一条 + 恢复报一条，避免刷屏）
             hb_limit = float(self.live_cfg.get("heartbeat_seconds", 60))
             trading_now = is_trading_time(now, self.symbols)
+            if trading_now and not self._trading_prev:
+                # v2.1：时段起点（10:30 / 13:30 / 夜盘）重置行情基准——否则 10:15-10:30
+                # 与午休的空档会被当成「行情停滞」而主动退出（10-23 10:30 实证）
+                self.last_tick_ts = time.time()
+                self._gap_reported = False
+            self._trading_prev = trading_now
             gap = time.time() - self.last_tick_ts if self.last_tick_ts > 0 else 0.0
             if self._gap_reported and self.last_tick_ts > 0 and gap <= hb_limit:
                 self._gap_reported = False
