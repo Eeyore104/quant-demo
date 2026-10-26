@@ -283,3 +283,57 @@ def test_apply_force_targets_keeps_signal():
     assert targets["M0"].direction == -1
     assert targets["M0"].lots == 3
     assert targets["M0"].signal == 1  # 原信号保留，供重入锁定释放
+
+
+# ---------------------------------------------------------------- R5：日内注册的极值口径
+
+
+def test_intraday_registered_stop_ignores_pre_entry_low():
+    """补建/新注册的止损不能用「建仓前」的当日最低价判死（2026-10-26 真实事故）。"""
+    ledger, guard = _setup()
+    guard.atr_hint = {"M0": 20.0}
+    _open(ledger, 3000.0, 2)
+    guard.sync_stops("M0", row_idx=ledger.day_idx - 1)  # 补建语义：立即 armed
+
+    # 当日最低 1000 发生在建仓之前；旧逻辑会据此立即触发
+    assert guard.on_tick("M0", _tick(last=3000.0, low=1000.0)) is None
+
+
+def test_intraday_registered_stop_triggers_on_post_entry_break():
+    ledger, guard = _setup()
+    guard.atr_hint = {"M0": 20.0}
+    _open(ledger, 3000.0, 2)
+    guard.sync_stops("M0", row_idx=ledger.day_idx - 1)
+
+    guard.on_tick("M0", _tick(last=3000.0, low=1000.0))  # 建仓前低点，忽略
+    trig = guard.on_tick("M0", _tick(last=2950.0, low=2950.0))  # 注册后真实跌破
+
+    assert trig is not None
+    assert trig.kind == "stop_fixed"
+
+
+def test_overnight_position_still_uses_day_extremes():
+    """跨日持仓仍用当日极值，保留隔夜跳空识别。"""
+    ledger, guard = _setup()
+    guard.atr_hint = {"M0": 20.0}
+    _open(ledger, 3000.0, 2)
+    guard.sync_stops("M0")  # entry_row = 当日，不 armed
+    ledger.day_idx += 1  # 次日
+
+    trig = guard.on_tick("M0", _tick(last=3000.0, low=2940.0))
+
+    assert trig is not None
+
+
+def test_clear_removes_since_tracking():
+    ledger, guard = _setup()
+    guard.atr_hint = {"M0": 20.0}
+    _open(ledger, 3000.0, 2)
+    guard.sync_stops("M0")
+    assert "M0" in guard.since and "M0" in guard.reg_day
+
+    _close(ledger, 3000.0, 2)
+    guard.sync_stops("M0")
+
+    assert "M0" not in guard.since
+    assert "M0" not in guard.reg_day

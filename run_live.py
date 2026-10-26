@@ -106,7 +106,7 @@ def advance_day(ledger, guard) -> None:
     guard.new_day()
 
 
-def acquire_single_instance(port: int = 49156) -> socket.socket | None:
+def acquire_single_instance(port: int = 49517) -> socket.socket | None:
     """单实例互斥：绑定本地回环端口，已被占用（已有实例）则返回 None。
 
     用于兜底「任务多重触发 / 进程孤儿」场景——无论上游如何重复启动，

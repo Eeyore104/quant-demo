@@ -63,6 +63,9 @@ class LiveRiskGuard:
         self.prev_close: dict[str, float] = {k: float(v) for k, v in (prev_close or {}).items()}
         # 最近一次信号重放得到的 ATR（截至信号日收盘；与回测 register_entry 同源）
         self.atr_hint: dict[str, float] = {}
+        # v2.1-R5：止损注册后的极值（防止用「建仓前」的当日高低点误判）
+        self.since: dict[str, list[float]] = {}  # symbol → [low, high]
+        self.reg_day: dict[str, int] = {}  # symbol → 注册时的 day_idx
 
     # -------------------------------------------------- 下单前闸门
 
@@ -183,6 +186,8 @@ class LiveRiskGuard:
         if pos == 0:
             if self.manager.stops.state(symbol) is not None:
                 self.manager.stops.clear(symbol)
+                self.since.pop(symbol, None)
+                self.reg_day.pop(symbol, None)
                 events.append(RiskEvent(date, "stop_clear", symbol, "持仓归零 → 清除止损状态"))
             return events
 
@@ -196,8 +201,13 @@ class LiveRiskGuard:
             return events
 
         # 新建 / 反向重建 / ATR 补全（保留原基准日，避免 armed 被重置）
-        entry_row = row if (st is None or st.direction != direction) else st.entry_row
+        is_new = st is None or st.direction != direction
+        entry_row = row if is_new else st.entry_row
         self.manager.stops.register_entry(symbol, direction, avg, atr, entry_row)
+        # v2.1-R5：记录「注册后极值」起点（当日判定只用注册后的价格）
+        if is_new or symbol not in self.since:
+            self.since[symbol] = [avg, avg]
+        self.reg_day[symbol] = self.ledger.day_idx
         if atr > 0:
             events.append(
                 RiskEvent(
@@ -221,12 +231,37 @@ class LiveRiskGuard:
     # -------------------------------------------------- 盘中止损止盈
 
     def on_tick(self, symbol: str, tick) -> StopTrigger | None:
-        """tick 触价判定（合成 bar → 复用回测 intrabar 逻辑）。"""
-        return self.manager.stops.intrabar_trigger(symbol, self.ledger.day_idx, tick_bar(tick))
+        """tick 触价判定（合成 bar → 复用回测 intrabar 逻辑）。
+
+        v2.1-R5：**当日注册**的止损只用「注册后观察到的极值」——否则补建 / 新建仓
+        会拿建仓之前出现的当日最低（最高）价把自己止损掉（2026-10-26 实测）。
+        跨日持仓仍用 tick 的当日极值，保留隔夜跳空识别能力。
+        """
+        last = float(tick.last_price)
+        ext = self.since.get(symbol)
+        if ext is None:
+            ext = [last, last]
+            self.since[symbol] = ext
+        else:
+            ext[0] = min(ext[0], last)
+            ext[1] = max(ext[1], last)
+        bar = tick_bar(tick)
+        if self.reg_day.get(symbol) == self.ledger.day_idx:
+            bar = TickBar(
+                open=bar.open,
+                high=max(ext[1], last),
+                low=min(ext[0], last),
+                close=bar.close,
+                volume=bar.volume,
+                date=bar.date,
+            )
+        return self.manager.stops.intrabar_trigger(symbol, self.ledger.day_idx, bar)
 
     def notify_stop(self, symbol: str, direction: int, *, date: str = "") -> None:
         """止损/止盈平仓执行完成后调用：清状态 + 登记重入锁定（对齐回测）。"""
         self.manager.stops.clear(symbol)
+        self.since.pop(symbol, None)
+        self.reg_day.pop(symbol, None)
         self.manager.guard.on_stop(symbol, self.ledger.day_idx, direction)
 
     def update_signal(self, symbol: str, sig: int) -> None:
