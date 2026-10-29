@@ -337,3 +337,17 @@ def test_clear_removes_since_tracking():
 
     assert "M0" not in guard.since
     assert "M0" not in guard.reg_day
+
+
+def test_daily_sync_does_not_rewrite_fixed_stop():
+    """每日校准（无成交）不得重算固定止损，否则手工/演练设定会被按配置抹掉。"""
+    ledger, guard = _setup()
+    guard.atr_hint = {"M0": 20.0}
+    _open(ledger, 3000.0, 2)
+    guard.sync_stops("M0")
+    guard.manager.stops.states["M0"].fixed_stop = 2995.0  # 演练/人工设定
+
+    events = guard.sync_stops("M0")  # 模拟每日校准，无加仓
+
+    assert events == []
+    assert guard.stop_state("M0").fixed_stop == pytest.approx(2995.0)

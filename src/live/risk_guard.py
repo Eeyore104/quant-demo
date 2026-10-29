@@ -196,6 +196,10 @@ class LiveRiskGuard:
         st = self.manager.stops.state(symbol)
         atr = float(self.atr_hint.get(symbol, 0.0) or 0.0)
         if st is not None and st.direction == direction and st.atr_entry > 0:
+            if abs(avg - st.entry_price) < 1e-9:
+                # v2.1-R9：无加仓 → 不做重估。否则「每日校准」会按当前配置把固定止损
+                # 重算一遍（10-29 实测：演练设定的 6664 被抹成 2×ATR 的 6160.4）
+                return events
             self.manager.stops.update_entry(symbol, avg)
             events.append(RiskEvent(date, "stop_update", symbol, f"加仓重估：均价 {avg:.4f}"))
             return events

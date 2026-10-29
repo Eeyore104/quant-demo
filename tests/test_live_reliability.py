@@ -173,3 +173,43 @@ def test_no_ack_waits_for_timeout():
     ex.book.orders["1"] = order
 
     assert ex._check_unacked() == []
+
+
+def test_quote_price_uses_order_side_not_position_side():
+    """R10：平多=卖（挂低）、平空=买（挂高）；开多=买、开空=卖。"""
+    ex, _ = _executor()
+    last, tick = 3000.0, 1.0
+
+    assert ex._quote_price("M0", "LONG", 0, offset="OPEN") == last + tick
+    assert ex._quote_price("M0", "LONG", 0, offset="CLOSE") == last - tick
+    assert ex._quote_price("M0", "SHORT", 0, offset="OPEN") == last - tick
+    assert ex._quote_price("M0", "SHORT", 0, offset="CLOSE") == last + tick
+    # 追单继续沿同一方向加价
+    assert ex._quote_price("M0", "LONG", 2, offset="CLOSE") == last - 3 * tick
+
+
+def test_stop_reject_backoff_after_three_rejects():
+    """R12：止损连续被拒 3 次 → 退避 5 分钟，避免每秒重报刷屏。"""
+    ex, session = _executor()
+    ex.ledger.apply_fill(
+        instrument="m2701", direction="LONG", offset="OPEN",
+        price=3000.0, volume=1, trading_day="2026-10-29",
+    )
+    # 直接构造 3 次拒绝
+    for _ in range(3):
+        ex.stop_orders.add("x")
+        order = LiveOrder(
+            order_ref="x", symbol="M0", instrument="m2701", direction="LONG",
+            offset="CLOSE", price=3000.0, volume=1, status=ST_PENDING,
+        )
+        ex.book.orders["x"] = order
+        from src.live.ctp_api import OrderRejected
+
+        ex.on_event(OrderRejected(instrument="m2701", order_ref="x",
+                                  error_id=30, error_msg="平仓量超过持仓量"))
+        ex.stop_orders.discard("x")
+
+    assert "M0" in ex.reject_backoff
+    notes = ex.execute_stop("M0", type("T", (), {"kind": "stop_fixed", "level": 2960.0})(),
+                            ex.ticks["M0"])
+    assert notes and notes[0].kind == "skip"

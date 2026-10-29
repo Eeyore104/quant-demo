@@ -113,6 +113,8 @@ class Executor:
         self.pending_stop: set[str] = set()  # 止损在途的品种
         self.chase_pending: set[str] = set()  # 已请求撤单、待重挂的订单
         self.no_ack_reported: set[str] = set()  # 已告警「无回执」的订单（每单一次）
+        self.reject_streak: dict[str, int] = {}  # 止损单连续被拒次数
+        self.reject_backoff: dict[str, float] = {}  # 品种 → 退避截止时刻
         self.ack_timeout = float(self.execute_cfg.get("ack_timeout_seconds", 10))
         self.notes: list[ExecNote] = []
 
@@ -140,7 +142,7 @@ class Executor:
                 continue
             legs = self._plan_legs(symbol, cur, target, date)
             for offset, direction, lots in legs:
-                price = self._quote_price(symbol, direction, chase=0)
+                price = self._quote_price(symbol, direction, chase=0, offset=offset)
                 if offset == "OPEN":
                     lots2, _notes, events = self.guard.gate_open(
                         symbol, direction, lots, price, tick, sig=tp.direction, date=date
@@ -185,13 +187,16 @@ class Executor:
     ) -> list[ExecNote]:
         """止损 / 止盈触发 → 平仓腿（上期所拆分）→ 报单 + 重入标记。"""
         out: list[ExecNote] = []
+        if time.time() < self.reject_backoff.get(symbol, 0.0):
+            # v2.1-R12：连续被拒后退避，避免孤儿委托占额导致每秒重报刷屏
+            return [ExecNote("skip", symbol, "止损重报退避中（连续被拒）")]
         cur = self.ledger.net_size(symbol)
         if cur == 0:
             return out
         instrument = self.ledger.symbol_to_instrument.get(symbol, "")
         direction = "LONG" if cur > 0 else "SHORT"
         for offset, lots in self._close_legs(symbol, direction, abs(cur), date, split=True):
-            price = self._quote_price(symbol, direction, chase=0)
+            price = self._quote_price(symbol, direction, chase=0, offset=offset)
             lots2, _notes, events = self.guard.gate_close(symbol, direction, lots, tick, date=date)
             for ev in events:
                 out.append(ExecNote("risk", symbol, ev.describe()))
@@ -324,6 +329,13 @@ class Executor:
                         ev.order_ref,
                     )
                 )
+                if order.order_ref in self.stop_orders:
+                    # v2.1-R12：连续 3 次被拒 → 退避 5 分钟（孤儿委托占额时会持续拒单）
+                    n = self.reject_streak.get(order.symbol, 0) + 1
+                    self.reject_streak[order.symbol] = n
+                    if n >= 3:
+                        self.reject_backoff[order.symbol] = time.time() + 300
+                        self.reject_streak[order.symbol] = 0
                 out.extend(self._after_terminal(order, ev.ts))
         elif isinstance(ev, ActionRsp):
             self.book.apply_action_rsp(ev.ok, ev.order_ref, ev.error_msg, ev.ts)
@@ -367,7 +379,8 @@ class Executor:
                 direction = order.direction
                 try:
                     price = self._quote_price(
-                        order.symbol, direction, chase=order.chase_count + 1
+                        order.symbol, direction, chase=order.chase_count + 1,
+                        offset=order.offset,
                     )
                     new_ref = self._submit(
                         order.symbol, order.instrument, direction, order.offset,
@@ -437,15 +450,23 @@ class Executor:
             return self.ledger.close_breakdown(symbol, direction, lots, date)
         return [("CLOSE", lots)]
 
-    def _quote_price(self, symbol: str, direction: str, chase: int) -> float:
-        """限价：买入 = 最新价 + (1+追单数) 跳；卖出 = 最新价 − (1+追单数) 跳。"""
+    def _quote_price(
+        self, symbol: str, direction: str, chase: int, offset: str = "OPEN"
+    ) -> float:
+        """限价：买单 = 最新价 + (1+追单数) 跳；卖单 = 最新价 − (1+追单数) 跳。
+
+        v2.1-R10：买卖方向按「报单方向」判定（开多/平空=买，开空/平多=卖）。
+        此前只看持仓方向，导致平仓腿挂在不利价位——下跌中止损单永远成交不了
+        （2026-10-29 10:50 实测：平多挂 6668，市价 6666，连追 3 次未成交）。
+        """
         tick = self.ticks.get(symbol)
         if tick is None:
             raise RuntimeError(f"{symbol} 无行情快照，无法报价")
         tick_size = float(self.ledger.contracts[symbol].tick_size)
         base = float(tick.last_price)
         k = (1 + int(chase)) * tick_size
-        return base + k if direction == "LONG" else base - k
+        is_buy = order_ctp_direction(direction, offset) == DIR_BUY
+        return base + k if is_buy else base - k
 
     def _submit(
         self,

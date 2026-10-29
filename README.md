@@ -2,9 +2,9 @@
 
 ![CI](https://github.com/Eeyore104/quant-demo/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB)
-![Tests](https://img.shields.io/badge/tests-227%20passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-253%20passed-brightgreen)
 ![Market](https://img.shields.io/badge/market-China%20Futures-C8102E)
-![Status](https://img.shields.io/badge/status-v2.0%20done-success)
+![Status](https://img.shields.io/badge/status-v2.1%20in%20progress-yellow)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 > 一个结构清晰、可一键运行、能产出专业回测报告的**个人期货量化研究项目**。
@@ -205,7 +205,7 @@ quant-demo/
 - [x] **v1.4 工程化与看板**：结果库（SQLite）+ 数据质量校验 + 自包含 HTML 报告 + Streamlit 看板 + 每日流水线（数据更新 → 跑批 → 报告 → 通知）+ Windows 定时任务 + 企业微信告警
 - [x] **v2.0 SimNow 仿真链路**：CTP 通道接入（openctp-ctp）· 信号 → 下单 → 成交回报 → 持仓 / 风控 → 日报全链路 · 双账本对账 · 守护任务——**2026-10-20 连续 5 交易日无人值守验收通过**（对账 5×4/4，权益趋势偏差恒定 0.65 元）
 - [x] **M8 Web 看板 + 风控模块**：已落地——风控模块并入 v1.3（ATR 预算 / 止损止盈 / 熔断 / 压力测试），可视化看板并入 v1.4（Streamlit 看板 + 自包含 HTML 报告）
-- [ ] **v2.1 仿真补课（v2.0 遗留，下一步）**：live 侧止损/止盈激活（新开仓注册入场）· 任务链「cmd 孤儿」治理 · 首次真实调仓验证
+- [ ] **v2.1 仿真补课（进行中）**：live 侧止损闭环（成交即时注册 / 每日信号释放 / 日初重置 / 启动补建 / 极值口径）· 任务链看门狗（端口轻探 + 进程名校验）· 单日盈亏口径 —— 10-22 ~ 10-29 三轮实战，**止损已能在真实行情中触发**；余：专项日成交验证 + 在途委托查询（R11）
 - [ ] **M9 实盘准备（真金白银）**：程序化交易报备（证监会〔2025〕12 号）+ 期货公司确认 → 小资金实盘。**前置**：v2.1 完成（仿真与实盘是两件事）
 
 ## 合规提示（重要）
