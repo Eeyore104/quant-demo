@@ -52,6 +52,8 @@ class VirtualLedger:
         self.account = PortfolioAccount(initial_capital, contracts)
         # 今昨仓：{(symbol, side): {trading_day: 未平手数}}
         self.open_lots: dict[tuple[str, str], dict[str, int]] = {}
+        # 换月价差成本（v2.2）：正向 = 换月后持仓成本抬高（不利），单列不进策略绩效
+        self.roll_cost: dict[str, float] = {}
 
         # 统计（熔断 / 信号基准）
         self.day_idx = 0  # 仿真运行第几个交易日（自 1 起）
@@ -160,6 +162,53 @@ class VirtualLedger:
             if book[day] == 0:
                 del book[day]
 
+    # -------------------------------------------------- 换月映射（v2.2）
+
+    def register_instrument(self, symbol: str, instrument: str) -> None:
+        """换月第一步：把新合约登记进映射（此后新合约的成交回报才能入账）。
+
+        旧合约**保持映射**直到 ``commit_roll``——平旧仓的成交回报还需要它。
+        """
+        self.instrument_map[instrument] = symbol
+        log.info("换月登记：%s → %s（旧合约仍可入账）", symbol, instrument)
+
+    def commit_roll(
+        self,
+        symbol: str,
+        *,
+        old_instrument: str,
+        new_instrument: str,
+        old_avg_price: float,
+        volume: int,
+        direction: str,
+        trading_day: str,
+    ) -> dict:
+        """换月收尾：切换品种当前合约 + 记价差成本。
+
+        价差用「换月前后账本均价之差」计算，而不是报单价格——账本均价才是持仓
+        成本基准，部分成交 / 多笔成交都不会算错。
+        """
+        spec = self.contracts[symbol]
+        new_avg = float(self.state(symbol).avg_price)
+        sign = 1 if direction == "LONG" else -1
+        cost = (new_avg - old_avg_price) * sign * int(volume) * spec.multiplier
+        self.instrument_map.pop(old_instrument, None)
+        self.symbol_to_instrument[symbol] = new_instrument
+        self.roll_cost[symbol] = self.roll_cost.get(symbol, 0.0) + cost
+        log.info(
+            "换月收尾：%s %s → %s ｜ 均价 %.4f → %.4f ｜ 价差成本 %+.2f",
+            symbol, old_instrument, new_instrument, old_avg_price, new_avg, cost,
+        )
+        return {
+            "symbol": symbol,
+            "from": old_instrument,
+            "to": new_instrument,
+            "old_avg_price": old_avg_price,
+            "new_avg_price": new_avg,
+            "roll_cost": cost,
+            "trading_day": trading_day,
+        }
+
     # -------------------------------------------------- 今昨仓查询（拆单依据）
 
     def today_lots(self, symbol: str, direction: str, current_day: str) -> int:
@@ -251,6 +300,9 @@ class VirtualLedger:
                 f"{sym}|{side}": {d: n for d, n in book.items()}
                 for (sym, side), book in self.open_lots.items()
             },
+            "roll_cost": dict(self.roll_cost),
+            # v2.2：品种当前合约（换月后重启必须沿用，否则会往旧合约下单）
+            "current_instruments": dict(self.symbol_to_instrument),
             "stats": {
                 "day_idx": self.day_idx,
                 "day_ref_equity": self.day_ref_equity,
@@ -286,6 +338,17 @@ class VirtualLedger:
         for key, book in (d.get("open_lots") or {}).items():
             sym, side = key.split("|", 1)
             self.open_lots[(sym, side)] = {str(k): int(v) for k, v in book.items()}
+        self.roll_cost = {k: float(v) for k, v in (d.get("roll_cost") or {}).items()}
+        current = d.get("current_instruments") or {}
+        if current:
+            for sym, inst in current.items():
+                if sym in self.symbol_to_instrument and self.symbol_to_instrument[sym] != inst:
+                    log.warning(
+                        "换月映射恢复：%s %s → %s（配置已过期，请同步 config.yaml）",
+                        sym, self.symbol_to_instrument[sym], inst,
+                    )
+                self.symbol_to_instrument[sym] = str(inst)
+            self.instrument_map = {v: k for k, v in self.symbol_to_instrument.items()}
         stats = d.get("stats") or {}
         self.day_idx = int(stats.get("day_idx", 0))
         self.day_ref_equity = float(stats.get("day_ref_equity", self.initial_capital))

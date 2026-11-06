@@ -30,7 +30,9 @@ from pathlib import Path
 
 from src.data import store
 from src.engine.contracts import build_contracts
-from src.live.adapter import Executor
+from src.live import roll as roll_mod
+from src.live.adapter import ExecNote, Executor
+from src.live.alert import alert
 from src.live.ctp_api import (
     ActionRejected,
     ActionRsp,
@@ -39,8 +41,10 @@ from src.live.ctp_api import (
     MdConnected,
     MdDisconnected,
     MdLogin,
+    OrderQryRsp,
     OrderRejected,
     OrderRtn,
+    QueryDone,
     SettlementConfirmed,
     TdAuth,
     TdConnected,
@@ -51,6 +55,7 @@ from src.live.ctp_api import (
 )
 from src.live.journal import Journal, build_daily_report, push_report, save_report
 from src.live.ledger import VirtualLedger
+from src.live.lifecycle import LifecycleBook
 from src.live.orders import OrderBook
 from src.live.reconcile import query_counter, reconcile_all
 from src.live.risk_guard import LiveRiskGuard
@@ -150,10 +155,17 @@ class LiveRuntime:
         self.guard = LiveRiskGuard(cfg.get("risk") or {}, self.contracts, self.ledger)
         self.book = OrderBook()
         self.session = CtpSession(self._session_cfg())
-        self.executor = Executor(self.session, self.book, self.ledger, self.guard, self.live_cfg)
+        # v2.2 合约生命周期（到期闸 / 强平）；None 之外的情况都按台账判定
+        self.lifecycle = LifecycleBook.from_config(self.live_cfg, cmap)
+        self._life_alerted: set[str] = set()  # 「品种:日期:状态」已告警（避免刷屏）
+        self.executor = Executor(
+            self.session, self.book, self.ledger, self.guard, self.live_cfg,
+            lifecycle=self.lifecycle,
+        )
         self.bridge = SignalBridge(cfg, self.contracts, self.ledger)
 
         self.state_dir = resolve_path("output/live/state")
+        self.plan_dir = resolve_path("output/live/plans")  # v2.2 换月计划目录
         self.exec_date = ""  # 最近一次目标执行的自然日
         self.settle_date = ""  # 最近一次日终结算的自然日
         self.tick_date_today = ""  # 最近收到行情 tick 的自然日（判「今日行情已就绪」）
@@ -204,6 +216,7 @@ class LiveRuntime:
         td = self.session.wait_for(SettlementConfirmed, timeout=30)
         if td is None or not td.ok:
             raise SystemExit("交易登录 / 结算确认失败")
+        orphans = self._clear_orphan_orders()  # v2.2 R11：先清孤儿单，再订阅行情
         self.session.subscribe(list(self.instrument_map.keys()))
         # 会话登记 + 事件流
         if self.conn is not None:
@@ -219,6 +232,10 @@ class LiveRuntime:
         self.journal.log(
             "connect", detail=f"启动：env={self.live_cfg.get('env')} dry_run={self.dry_run}"
         )
+        for line in orphans:
+            self.journal.log("orphan_cancel", detail=line)
+            alert("orphan_cancel", line, journal=self.journal)
+        self._check_lifecycle(startup=True)  # v2.2：到期巡检（启动即知，早于补建）
         self._backfill_stops()  # v2.1：持仓有、状态无 → 补建（立即受保护）
         self._warn_settle_missed()  # v2.1：漏结算告警（不自动补做，避免跨日口径静默失真）
         log.info(
@@ -231,6 +248,7 @@ class LiveRuntime:
 
     def close(self) -> None:
         try:
+            self.drain_orders()  # v2.2 R8：退出前撤在途委托（先收尾再存盘）
             self.save_state()
             if self.conn is not None and self.session_id:
                 results_db.close_live_session(self.conn, self.session_id)
@@ -273,6 +291,260 @@ class LiveRuntime:
             log.warning("漏结算：%s", msg)
             if self.journal is not None:
                 self.journal.log("settle_missed", detail=msg)
+
+    # -------------------------------------------------- v2.2 到期闸
+
+    def _check_lifecycle(self, *, startup: bool = False) -> None:
+        """到期状态巡检：warn / force_close / unknown 每品种每日各记一次事件。
+
+        ``startup=True`` 时额外打印一行台账摘要（便于从日志判断「今天系统怎么看合约」）。
+        """
+        if startup:
+            log.info(
+                "生命周期台账：%d 个合约已登记（%s）",
+                len(self.lifecycle.items),
+                "、".join(f"{s}={st}" for s, st in self.lifecycle.states().items()),
+            )
+        today = self.today()
+        for symbol in self.symbols:
+            state = self.lifecycle.state(symbol)
+            if state == "ok":
+                continue
+            key = f"{symbol}:{today}:{state}"
+            if key in self._life_alerted:
+                continue
+            self._life_alerted.add(key)
+            detail = self.lifecycle.describe(symbol)
+            if state == "force_close":
+                log.error("到期强制平仓窗口：%s", detail)
+            elif state == "warn":
+                log.warning("合约临近到期（禁止新开）：%s", detail)
+            else:
+                log.error("合约未登记生命周期（禁止开仓）：%s", detail)
+            if self.journal is not None:
+                self.journal.log(f"expiry_{state}", symbol=symbol, detail=detail)
+            alert(f"expiry_{state}", detail, symbol=symbol, journal=self.journal)
+
+    def _force_close_expiring(self) -> None:
+        """``force_close`` 状态且仍有持仓 → 强制平仓（只平不开，每小时重试）。"""
+        for symbol in self.lifecycle.force_close_symbols():
+            if self.ledger.net_size(symbol) == 0:
+                continue
+            detail = self.lifecycle.describe(symbol)
+            if self.dry_run:
+                log.warning("dry_run：应到期强平但不下单（%s）", detail)
+                continue
+            notes = self.executor.force_flat(symbol, date=self.today())
+            if notes:
+                self.log_notes(notes)
+                log.error(
+                    "到期强平：%s → %s",
+                    detail,
+                    "；".join(n.detail for n in notes),
+                )
+            else:
+                log.error("到期强平未产生委托（检查行情 / 合约映射）：%s", detail)
+
+    # -------------------------------------------------- v2.2 启动清理 / 退出收尾
+
+    def _clear_orphan_orders(self, timeout: float = 8.0) -> list[str]:
+        """启动清理：柜台当日未终态委托全部撤掉（R11）。
+
+        判据：本地订单簿是内存态，重启后为空 →「柜台有、本地无」= 孤儿。
+        CTP 只返回当日委托，跨日单已随日终失效，无需处理历史。
+        调用时点：交易登录之后、订阅行情之前（此时队列里只有查询响应，不会丢 tick）。
+        """
+        if self.dry_run:
+            return []
+        try:
+            self.session.query_order()
+        except Exception as e:  # noqa: BLE001 - 清理失败不阻塞启动
+            log.warning("委托查询失败（跳过孤儿清理）：%s", e)
+            return []
+
+        deadline = time.time() + timeout
+        found: list[OrderQryRsp] = []
+        while time.time() < deadline:
+            ev = self.session.next_event(timeout=0.3)
+            if ev is None:
+                continue
+            if isinstance(ev, OrderQryRsp):
+                found.append(ev)
+            elif isinstance(ev, QueryDone) and ev.query == "order":
+                break
+            elif isinstance(ev, CtpError):
+                log.warning("委托查询错误：%s %s", ev.error_id, ev.error_msg)
+
+        active = [o for o in found if o.is_active]
+        lines: list[str] = []
+        for o in active:
+            try:
+                self.session.order_action(o.order_ref, o.instrument, o.order_sys_id)
+                lines.append(f"撤销孤儿委托：{o.describe()}")
+                log.warning("撤销孤儿委托：%s", o.describe())
+            except Exception as e:  # noqa: BLE001 - 单笔失败不阻塞
+                log.warning("撤单失败（%s）：%s", o.order_ref, e)
+        if not active:
+            log.info("启动检查：柜台无未终态委托（当日 %d 笔记录）", len(found))
+        return lines
+
+    def drain_orders(self, timeout: float = 15.0) -> list[ExecNote]:
+        """退出前处置在途委托（R8）：全撤 → 等终态（超时则告警）。"""
+        try:
+            active = self.book.active_orders()
+        except Exception:  # noqa: BLE001 - 退出路径不因清理失败而卡住
+            return []
+        if not active:
+            return []
+        log.warning("退出前撤在途委托 %d 笔", len(active))
+        for o in active:
+            try:
+                self.session.order_action(o.order_ref, o.instrument, o.order_sys_id)
+            except Exception as e:  # noqa: BLE001
+                log.warning("撤单失败（%s）：%s", o.order_ref, e)
+        deadline = time.time() + timeout
+        while time.time() < deadline and self.book.active_orders():
+            try:
+                self.pump(0.5)
+            except Exception:  # noqa: BLE001
+                break
+        left = self.book.active_orders()
+        notes = [
+            ExecNote("exit_pending", o.symbol, f"退出仍在途：{o.describe()}", o.order_ref)
+            for o in left
+        ]
+        for n in notes:
+            log.error("%s", n.detail)
+        return notes
+
+    # -------------------------------------------------- v2.2 移仓执行
+
+    def _maybe_execute_roll(self) -> None:
+        """当日已确认、未执行的移仓计划 → 执行（每日最多一次，执行后打标）。"""
+        plan = roll_mod.latest_plan(self.plan_dir)
+        if plan is None or not plan.confirmed or plan.executed_at:
+            return
+        if plan.date != self.today():
+            log.warning("移仓计划 %s 不是当日的（%s），不执行", plan.plan_id, plan.date)
+            return
+        if self.dry_run:
+            log.warning("dry_run：移仓计划 %s 已确认，但本次不下单", plan.plan_id)
+            return
+        self._execute_roll(plan)
+
+    def _wait_flat(self, symbol: str, timeout: float = 60.0) -> bool:
+        """等平旧仓完成（净持仓归零）；无在途委托且约 2 秒不动 → 判失败。"""
+        deadline = time.time() + timeout
+        idle = 0
+        while time.time() < deadline:
+            if self.ledger.net_size(symbol) == 0:
+                return True
+            if self.book.active_orders(symbol):
+                idle = 0
+            else:
+                idle += 1
+                if idle >= 4:
+                    break
+            self.pump(0.5)
+        return self.ledger.net_size(symbol) == 0
+
+    def _wait_position(self, symbol: str, target: int, timeout: float = 60.0) -> bool:
+        """等开新仓到位（净持仓 == target）。"""
+        deadline = time.time() + timeout
+        idle = 0
+        while time.time() < deadline:
+            if self.ledger.net_size(symbol) == target:
+                return True
+            if self.book.active_orders(symbol):
+                idle = 0
+            else:
+                idle += 1
+                if idle >= 4:
+                    break
+            self.pump(0.5)
+        return self.ledger.net_size(symbol) == target
+
+    def _execute_roll(self, plan) -> None:
+        """逐项执行移仓：平旧 → 等归零 → 登记新合约 → 开新 → 重挂防护 → 迁移收尾。"""
+        log.info("开始执行移仓计划 %s（%d 项）", plan.plan_id, len(plan.items))
+        ok: list[str] = []
+        failed: list[str] = []
+        for item in plan.items:
+            symbol = item.symbol
+            try:
+                if symbol not in self.symbols:
+                    failed.append(f"{symbol} 不在品种池")
+                    continue
+                if self.lifecycle.contract_of(item.to_instrument) is None:
+                    failed.append(f"{symbol} 目标合约 {item.to_instrument} 未登记生命周期")
+                    continue
+                if item.direction == "LONG":
+                    to_target = 1
+                elif item.direction == "SHORT":
+                    to_target = -1
+                else:
+                    to_target = 0
+                old_instrument = self.ledger.symbol_to_instrument.get(symbol, "")
+                old_avg = float(self.ledger.state(symbol).avg_price)
+                if item.lots > 0:
+                    self.log_notes(self.executor.force_flat(symbol, date=self.today()))
+                    if not self._wait_flat(symbol):
+                        pos = self.ledger.net_size(symbol)
+                        failed.append(f"{symbol} 平旧未完成（净持仓 {pos}）")
+                        continue
+                self.ledger.register_instrument(symbol, item.to_instrument)
+                self.lifecycle.override(symbol, item.to_instrument)
+                if item.lots > 0:
+                    self.log_notes(
+                        self.executor.open_for_roll(
+                            symbol, item.direction, item.lots, date=self.today()
+                        )
+                    )
+                    want = to_target * item.lots
+                    if not self._wait_position(symbol, want):
+                        pos = self.ledger.net_size(symbol)
+                        failed.append(f"{symbol} 开新未完成（净持仓 {pos}）")
+                        if self.journal is not None:
+                            self.journal.log("roll_failed", symbol=symbol,
+                                             detail=f"开新未到位，目标 {want}")
+                        continue
+                    ev = self.guard.rearm_stop(symbol, date=self.today())
+                    if ev is not None:
+                        self.log_notes([ExecNote("risk", symbol, ev.detail)])
+                volume = abs(self.ledger.net_size(symbol))
+                rec = self.ledger.commit_roll(
+                    symbol,
+                    old_instrument=old_instrument,
+                    new_instrument=item.to_instrument,
+                    old_avg_price=old_avg,
+                    volume=volume,
+                    direction=item.direction or "LONG",
+                    trading_day=self.today(),
+                )
+                ok.append(
+                    f"{symbol} {old_instrument}→{item.to_instrument} "
+                    f"价差成本 {rec['roll_cost']:+.2f}"
+                )
+                if self.journal is not None:
+                    self.journal.log(
+                        "roll", symbol=symbol,
+                        detail=(
+                            f"{rec['from']} → {rec['to']}（{volume} 手，"
+                            f"价差 {rec['roll_cost']:+.2f}）"
+                        ),
+                    )
+            except Exception as e:  # noqa: BLE001 - 单项失败不拖垮其余品种
+                log.exception("移仓失败（%s）：%s", symbol, e)
+                failed.append(f"{symbol} 异常：{e}")
+        plan.executed_at = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        roll_mod.save_plan(plan, self.plan_dir)
+        log.info("移仓计划 %s 执行结束：成功 %d 项，失败 %d 项", plan.plan_id, len(ok), len(failed))
+        for line in ok:
+            log.info("  ✓ %s", line)
+        for line in failed:
+            log.error("  ✗ %s", line)
+            alert("roll_failed", line, journal=self.journal)
+        self.save_state()
 
     # -------------------------------------------------- 事件泵
 
@@ -328,6 +600,9 @@ class LiveRuntime:
                 log.warning("[%s] %s：%s", n.kind, n.symbol, n.detail)
             else:
                 log.info("[%s] %s：%s", n.kind, n.symbol, n.detail)
+        for n in notes or []:
+            if n.kind == "reject":
+                alert("order_reject", n.detail, symbol=n.symbol, journal=self.journal)
         if self.journal is not None:
             self.journal.record_notes(notes)
 
@@ -394,6 +669,7 @@ class LiveRuntime:
     def execute_round(self) -> None:
         """信号重放 → 目标仓位 → （非干跑时）逐腿执行。"""
         self._ensure_fresh_data()  # 执行前数据保新（陈旧则自动刷新）
+        self._maybe_execute_roll()  # v2.2：已确认的移仓计划先执行（换月后再算目标）
         targets = self.bridge.compute()
         if self.only:
             targets = {s: t for s, t in targets.items() if s in self.only}
@@ -434,6 +710,7 @@ class LiveRuntime:
                 "目标执行完成：%s",
                 f"{len(notes)} 条执行记录" if notes else "全部品种差额为 0（无调仓）",
             )
+            self._force_close_expiring()  # v2.2：到期强平（在目标执行之后，只平不开）
         self.exec_date = self.today()
 
     def _apply_force_targets(self, targets: dict) -> None:
@@ -521,6 +798,7 @@ class LiveRuntime:
             fuse_state=res["fuse_state"],
             counter_equity=counter_equity,
             reconciles=reconciles,
+            expiry_notes=[self.lifecycle.describe(s) for s in self.lifecycle.expiring()],
         )
         path = save_report(md, resolve_path("output/live/reports"), date)
         log.info("日报已生成：%s", path)
@@ -528,6 +806,12 @@ class LiveRuntime:
         if self.journal is not None:
             ok_n = sum(1 for r in reconciles if r.match)
             self.journal.log("reconcile", detail=f"对账 {ok_n}/{len(reconciles)} 项一致")
+            if reconciles and ok_n < len(reconciles):
+                alert(
+                    "reconcile_fail",
+                    f"对账不一致 {ok_n}/{len(reconciles)}",
+                    journal=self.journal,
+                )
 
         self.ledger.last_settle_date = date
         advance_day(self.ledger, self.guard)  # day_idx+1 → 次日基准 → 清「当日止损」
@@ -541,10 +825,19 @@ class LiveRuntime:
         self._ensure_fresh_data()  # 启动时数据保新（陈旧则自动刷新）
         last_chase = 0.0
         last_beat = 0.0
+        last_life_check = 0.0
         while True:
             self.pump(0.5)
             now = dt.datetime.now()
             t = now.time()
+
+            # v2.2 到期巡检（每小时）：跨过 T-warn / T-force 边界时即时生效；
+            # force_close 且有持仓 → 强平（交易时段内，每小时重试直到平掉）
+            if time.time() - last_life_check >= 3600:
+                self._check_lifecycle()
+                if is_trading_time(now, self.symbols):
+                    self._force_close_expiring()
+                last_life_check = time.time()
 
             # 目标执行（每日一次）：每天首次进入交易时段、且今日行情已就绪（首个 tick 已到）
             # 即执行——夜盘 21:00 在线（标准口径）即 21:00 执行；夜间离线的运行模式下，
@@ -704,12 +997,31 @@ def main() -> int:
     )
     parser.add_argument("--dry", action="store_true", help="强制干跑（不下单）")
     parser.add_argument(
+        "--confirm-roll",
+        default="",
+        metavar="PLAN_ID",
+        help="确认换月计划（只置确认位，不立即下单；下次执行轮生效）",
+    )
+    parser.add_argument(
         "--force-target",
         default="",
         metavar="M0=+1,RB0=-2",
         help="联调覆盖目标仓位（仅与 --once 同用；走完整下单链路）",
     )
     args = parser.parse_args()
+
+    # 换月确认：不需要连柜台，也不受单实例锁限制（常驻进程在跑时也能确认）
+    if args.confirm_roll:
+        base = resolve_path("output/live/plans")
+        plan = roll_mod.confirm_plan(args.confirm_roll, base=base)
+        if plan is None:
+            print(f"计划不存在：{args.confirm_roll}（目录 {base}）")
+            return 1
+        print(f"已确认移仓计划 {plan.plan_id}（{plan.date}，{len(plan.items)} 项）")
+        for line in roll_mod.summary_lines(plan):
+            print(f"  {line}")
+        print("生效时点：下一个交易时段的目标执行轮（需重启进程加载新代码/配置）")
+        return 0
 
     cfg = load_config()
     live_cfg = dict(cfg.get("live") or {})

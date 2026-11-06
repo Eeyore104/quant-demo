@@ -102,11 +102,13 @@ class Executor:
         ledger: VirtualLedger,
         guard: LiveRiskGuard,
         live_cfg: dict,
+        lifecycle=None,
     ):
         self.session = session
         self.book = book
         self.ledger = ledger
         self.guard = guard
+        self.lifecycle = lifecycle  # v2.2：到期闸（None = 不启用，兼容既有测试）
         self.execute_cfg = dict(live_cfg.get("execute") or {})
         self.ticks: dict[str, object] = {}  # 最新 tick（symbol → Tick）
         self.stop_orders: set[str] = set()  # 止损单标记
@@ -142,6 +144,12 @@ class Executor:
                 continue
             legs = self._plan_legs(symbol, cur, target, date)
             for offset, direction, lots in legs:
+                # v2.2 到期闸：只拦开仓腿，平仓腿放行（到期强平优先于任何风控降级）
+                if offset == "OPEN" and self.lifecycle is not None:
+                    allowed, reason = self.lifecycle.can_open(symbol)
+                    if not allowed:
+                        out.append(ExecNote("refuse", symbol, f"到期闸拦截：{reason}"))
+                        continue
                 price = self._quote_price(symbol, direction, chase=0, offset=offset)
                 if offset == "OPEN":
                     lots2, _notes, events = self.guard.gate_open(
@@ -217,6 +225,69 @@ class Executor:
         # 注：止损监控的清除与重入锁定在「平仓单全成」后执行（_after_terminal）；
         # 若平仓单被拒 / 放弃，监控保留，下个 tick 自动重试（防重由 pending_stop 保证）。
         return out
+
+    # -------------------------------------------------- 到期强平（v2.2）
+
+    def force_flat(self, symbol: str, *, date: str = "") -> list[ExecNote]:
+        """到期强制平仓（只平不开）。
+
+        与 ``execute_stop`` 的差别：
+        - 不受 ``pending_stop`` / 重入锁 / 止损退避限制（到期是交易所强制，不是策略选择）；
+        - 仍走 ``gate_close``（只受涨跌停方向约束，保证金上永不拒绝）；
+        - 不登记 ``stop_orders``（这不是止损单，成交后不需要 ``notify_stop``）。
+        """
+        out: list[ExecNote] = []
+        cur = self.ledger.net_size(symbol)
+        if cur == 0:
+            return out
+        instrument = self.ledger.symbol_to_instrument.get(symbol, "")
+        if not instrument:
+            return [ExecNote("skip", symbol, "无合约映射，无法强平")]
+        tick = self.ticks.get(symbol)
+        if tick is None or float(getattr(tick, "last_price", 0) or 0) <= 0:
+            return [ExecNote("skip", symbol, "无有效行情，无法强平")]
+        direction = "LONG" if cur > 0 else "SHORT"
+        for offset, lots in self._close_legs(symbol, direction, abs(cur), date, split=True):
+            price = self._quote_price(symbol, direction, chase=0, offset=offset)
+            lots2, _notes, events = self.guard.gate_close(symbol, direction, lots, tick, date=date)
+            for ev in events:
+                out.append(ExecNote("risk", symbol, ev.describe()))
+            if lots2 <= 0:
+                out.append(ExecNote("refuse", symbol, f"到期强平被拦（{offset} {lots} 手）"))
+                continue
+            order_ref = self._submit(symbol, instrument, direction, offset, price, lots2)
+            out.append(
+                ExecNote(
+                    "force_flat",
+                    symbol,
+                    f"{offset} {lots2} 手 @{price:.4f}（到期强平）",
+                    order_ref,
+                )
+            )
+        return out
+
+    # -------------------------------------------------- 移仓开新腿（v2.2）
+
+    def open_for_roll(
+        self, symbol: str, direction: str, lots: int, *, date: str = ""
+    ) -> list[ExecNote]:
+        """移仓开新腿：**不过开仓闸门**。
+
+        理由：移仓前后仓位总量不变，重入锁 / 熔断 / 敞口都是为「新增风险」设计的；
+        用它们拦移仓，会得到「旧仓已平、新仓没开」的裸奔状态——比不做闸门更危险。
+        涨跌停仍由报单被拒兜底（与 ``force_flat`` 的平仓方向检查对称）。
+        """
+        instrument = self.ledger.symbol_to_instrument.get(symbol, "")
+        tick = self.ticks.get(symbol)
+        if not instrument or tick is None:
+            return [ExecNote("skip", symbol, "无合约映射 / 行情，无法开新腿")]
+        if float(getattr(tick, "last_price", 0) or 0) <= 0:
+            return [ExecNote("skip", symbol, "行情无效，无法开新腿")]
+        price = self._quote_price(symbol, direction, chase=0, offset="OPEN")
+        order_ref = self._submit(symbol, instrument, direction, "OPEN", price, int(lots))
+        return [
+            ExecNote("roll_open", symbol, f"开 {direction} {lots} 手 @{price:.4f}", order_ref)
+        ]
 
     # -------------------------------------------------- 追单
 

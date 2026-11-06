@@ -1,0 +1,67 @@
+# 合约生命周期表（v2.2 · docs/21 T2.2-1）
+#
+# 用途：到期硬闸的唯一数据源。系统只认真实合约 → 品种的对应关系，以及两个日期：
+#   individual_last  自然人客户最后了结日（**硬约束**，闸门只认它）
+#   last_trade       最后交易日（参考值，用于展示与复核）
+#
+# 口径（以交易所公告为准）：
+#   SHFE（上期所）  最后交易日 = 交割月 15 日；自然人须在最后交易日前第 3 个交易日收盘前了结
+#   DCE（大商所）   最后交易日 = 交割月第 10 个交易日；自然人不得进入交割月 → 前一月末了结
+#   CZCE（郑商所）  最后交易日 = 交割月第 10 个交易日；自然人不得进入交割月 → 前一月末了结
+#
+# 维护方式：换月前跑 `uv run python scripts/roll_plan.py --dry`，人工确认后更新本表。
+# 本表缺失某合约 → 该品种状态为 unknown → 禁止开仓（不会静默交易未知合约）。
+version: 2026-11-05
+
+contracts:
+  # ---- 上期所 ----
+  rb2701:
+    symbol: RB0
+    exchange: SHFE
+    last_trade: 2027-01-15
+    individual_last: 2027-01-12
+  al2611:
+    symbol: AL0
+    exchange: SHFE
+    last_trade: 2026-11-16
+    individual_last: 2026-11-11
+  # 换月候选（2026-11-06 实测持仓量 227,071，已超 al2701 的 200,907）
+  al2612:
+    symbol: AL0
+    exchange: SHFE
+    last_trade: 2026-12-16
+    individual_last: 2026-12-11
+
+  # ---- 大商所 ----
+  i2701:
+    symbol: I0
+    exchange: DCE
+    last_trade: 2027-01-15
+    individual_last: 2026-12-31
+  m2701:
+    symbol: M0
+    exchange: DCE
+    last_trade: 2027-01-15
+    individual_last: 2026-12-31
+  p2701:
+    symbol: P0
+    exchange: DCE
+    last_trade: 2027-01-15
+    individual_last: 2026-12-31
+
+  # ---- 郑商所 ----
+  SR701:
+    symbol: SR0
+    exchange: CZCE
+    last_trade: 2027-01-15
+    individual_last: 2026-12-31
+  MA701:
+    symbol: MA0
+    exchange: CZCE
+    last_trade: 2027-01-15
+    individual_last: 2026-12-31
+  TA701:
+    symbol: TA0
+    exchange: CZCE
+    last_trade: 2027-01-15
+    individual_last: 2026-12-31

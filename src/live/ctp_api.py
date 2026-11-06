@@ -84,6 +84,8 @@ ORDER_STATUS_NO_TRADE_QUEUEING = "3"  # 未成交还在队列中
 ORDER_STATUS_NO_TRADE_NOT_QUEUEING = "4"  # 未成交不在队列中
 ORDER_STATUS_CANCELED = "5"  # 撤单
 ORDER_STATUS_UNKNOWN = "a"  # 未知
+# 未终态（还在柜台挂着 / 可能占用平仓额度）：启动清理只撤这些
+ACTIVE_ORDER_STATUS = ("1", "2", "3", "a")
 
 STATUS_TEXT = {
     "0": "全部成交",
@@ -316,6 +318,38 @@ class PositionRsp(CtpEvent):
 
 
 @dataclass
+class OrderQryRsp(CtpEvent):
+    """委托查询响应（逐条）。用于启动时清理孤儿委托（v2.2 · R11）。"""
+
+    instrument: str = ""
+    order_ref: str = ""
+    direction: str = ""  # CTP：0=买 1=卖
+    offset: str = ""  # CombOffsetFlag 首字符：0 开 1 平 3 平今 4 平昨
+    status: str = ""
+    volume_total: int = 0
+    volume_traded: int = 0
+    order_sys_id: str = ""
+    front_id: int = 0
+    session_id: int = 0
+    insert_date: str = ""
+
+    @property
+    def is_active(self) -> bool:
+        return str(self.status) in ACTIVE_ORDER_STATUS
+
+    @property
+    def status_text(self) -> str:
+        return STATUS_TEXT.get(str(self.status), str(self.status))
+
+    def describe(self) -> str:
+        return (
+            f"{self.instrument} {DIRECTION_TEXT.get(self.direction, self.direction)}"
+            f"{OFFSET_TEXT.get(self.offset, self.offset)} "
+            f"{self.volume_traded}/{self.volume_total}（{self.status_text}）"
+        )
+
+
+@dataclass
 class QueryDone(CtpEvent):
     """查询批次结束标记（bIsLast）。"""
 
@@ -459,6 +493,31 @@ class _MdSpi(_mdapi.CThostFtdcMdSpi if _mdapi else object):  # pragma: no cover
             )
         )
 
+    def OnRspQryOrder(self, pOrder, pRspInfo, nRequestID, bIsLast):
+        ok, eid, emsg = _rsp_ok(pRspInfo)
+        if pOrder is not None and ok:
+            o = pOrder
+            comb = str(getattr(o, "CombOffsetFlag", "") or "")
+            self.client.evq.put(
+                OrderQryRsp(
+                    instrument=str(getattr(o, "InstrumentID", "") or ""),
+                    order_ref=str(getattr(o, "OrderRef", "") or ""),
+                    direction=str(getattr(o, "Direction", "") or ""),
+                    offset=comb[:1],
+                    status=str(getattr(o, "OrderStatus", "") or ""),
+                    volume_total=int(_clean_number(getattr(o, "VolumeTotalOriginal", 0))),
+                    volume_traded=int(_clean_number(getattr(o, "VolumeTraded", 0))),
+                    order_sys_id=str(getattr(o, "OrderSysID", "") or ""),
+                    front_id=int(_clean_number(getattr(o, "FrontID", 0))),
+                    session_id=int(_clean_number(getattr(o, "SessionID", 0))),
+                    insert_date=str(getattr(o, "InsertDate", "") or ""),
+                )
+            )
+        if bIsLast:
+            self.client.evq.put(
+                QueryDone(query="order", ok=ok, error_id=eid, error_msg=emsg)
+            )
+
     def OnRspError(self, pRspInfo, nRequestID, bIsLast):
         _, eid, emsg = _rsp_ok(pRspInfo)
         self.client.evq.put(CtpError(error_id=eid, error_msg=emsg, source="md"))
@@ -561,6 +620,17 @@ class TdClient:
         q.InstrumentID = instrument
         self._api.ReqQryInvestorPosition(q, self.next_request_id())
         log.debug("已发持仓查询请求：%s", instrument or "全部")
+
+    def query_order(self, instrument: str = "") -> None:
+        """查询当日全部委托（CTP 只保留当日）。"""
+        tdapi, _ = require_ctp()
+        self._throttle_query()
+        q = tdapi.CThostFtdcQryOrderField()
+        q.BrokerID = self.broker_id
+        q.InvestorID = self.user_id
+        q.InstrumentID = instrument
+        self._api.ReqQryOrder(q, self.next_request_id())
+        log.debug("已发委托查询请求：%s", instrument or "全部")
 
     # ------------------------------------------------ 报单 / 撤单
 
@@ -816,6 +886,31 @@ class _TdSpi(_tdapi.CThostFtdcTraderSpi if _tdapi else object):  # pragma: no co
                 QueryDone(query="position", ok=ok, error_id=eid, error_msg=emsg)
             )
 
+    def OnRspQryOrder(self, pOrder, pRspInfo, nRequestID, bIsLast):
+        ok, eid, emsg = _rsp_ok(pRspInfo)
+        if pOrder is not None and ok:
+            o = pOrder
+            comb = str(getattr(o, "CombOffsetFlag", "") or "")
+            self.client.evq.put(
+                OrderQryRsp(
+                    instrument=str(getattr(o, "InstrumentID", "") or ""),
+                    order_ref=str(getattr(o, "OrderRef", "") or ""),
+                    direction=str(getattr(o, "Direction", "") or ""),
+                    offset=comb[:1],
+                    status=str(getattr(o, "OrderStatus", "") or ""),
+                    volume_total=int(_clean_number(getattr(o, "VolumeTotalOriginal", 0))),
+                    volume_traded=int(_clean_number(getattr(o, "VolumeTraded", 0))),
+                    order_sys_id=str(getattr(o, "OrderSysID", "") or ""),
+                    front_id=int(_clean_number(getattr(o, "FrontID", 0))),
+                    session_id=int(_clean_number(getattr(o, "SessionID", 0))),
+                    insert_date=str(getattr(o, "InsertDate", "") or ""),
+                )
+            )
+        if bIsLast:
+            self.client.evq.put(
+                QueryDone(query="order", ok=ok, error_id=eid, error_msg=emsg)
+            )
+
     def OnRspError(self, pRspInfo, nRequestID, bIsLast):
         _, eid, emsg = _rsp_ok(pRspInfo)
         self.client.evq.put(CtpError(error_id=eid, error_msg=emsg, source="td"))
@@ -946,6 +1041,9 @@ class CtpSession:
 
     def query_position(self, instrument: str = "") -> None:
         self.td.query_position(instrument)
+
+    def query_order(self, instrument: str = "") -> None:
+        self.td.query_order(instrument)
 
     def order_insert(
         self,

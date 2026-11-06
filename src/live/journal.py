@@ -192,6 +192,7 @@ def build_daily_report(
     fuse_state: str = "",
     counter_equity: float | None = None,
     reconciles=None,
+    expiry_notes: list[str] | None = None,
 ) -> str:
     """当日运行汇总 → markdown。"""
     ev = [e for e in entries if e.get("date") == date]
@@ -206,6 +207,8 @@ def build_daily_report(
     chases = _of("chase", "abandon")
     risks = _of("risk", "refuse", "reject", "margin_degrade")
     fills = _of("fill")
+    rolls = _of("roll", "roll_open", "roll_failed")
+    rolls = _of("roll", "roll_open", "roll_failed")
     conns = _of("connect", "disconnect", "heartbeat")
     errors = _of("error")
 
@@ -219,6 +222,10 @@ def build_daily_report(
     if counter_equity is not None:
         lines.append(f"**柜台权益**：{counter_equity:,.2f}")
     lines.append(f"**持仓**：{positions_brief(ledger)} ｜ **熔断状态**：{fuse_state or '正常'}")
+    if expiry_notes:
+        lines.append(f"**合约到期**（{len(expiry_notes)} 项需处置）：")
+        for note in expiry_notes[:8]:
+            lines.append(f"- {note}")
     lines.append("")
     lines.append(f"**当日信号**：{len(sig)} 条")
     for e in sig[:8]:
@@ -228,6 +235,14 @@ def build_daily_report(
     )
     for e in fills[:8]:
         lines.append(f"- {e['detail']}")
+    if rolls:
+        lines.append(f"**换月**：{len(rolls)} 条")
+        for e in rolls[:5]:
+            lines.append(f"- {e['detail']}")
+    if rolls:
+        lines.append(f"**换月**：{len(rolls)} 条")
+        for e in rolls[:5]:
+            lines.append(f"- {e['detail']}")
     if stops:
         lines.append(f"**止损 / 止盈**：{len(stops)} 次")
         for e in stops[:5]:

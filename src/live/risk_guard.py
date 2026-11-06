@@ -268,6 +268,24 @@ class LiveRiskGuard:
         self.reg_day.pop(symbol, None)
         self.manager.guard.on_stop(symbol, self.ledger.day_idx, direction)
 
+    def rearm_stop(self, symbol: str, *, date: str = "") -> RiskEvent | None:
+        """移仓后立即恢复防护（v2.2）：换月不是新开仓，不吃 T+1 观察期。
+
+        平旧 → 开新期间，``sync_stops`` 会按「今日入场」重建止损（``entry_row=day_idx``），
+        当天不判定止损。换月只是同一笔持仓换了个壳，让它在换月日失去保护是制度性空窗。
+        这里只改 live 侧持有的 ``StopState`` 字段，不新增 engine 方法（守住红线）。
+        """
+        st = self.manager.stops.state(symbol)
+        if st is None:
+            return None
+        st.entry_row = self.ledger.day_idx - 1  # 回退一天 → 下一 tick 即 armed
+        avg = float(self.ledger.state(symbol).avg_price)
+        self.since[symbol] = [avg, avg]  # 极值起点重置为新均价
+        self.reg_day[symbol] = self.ledger.day_idx
+        return RiskEvent(
+            date, "roll_rearm", symbol, f"移仓后立即恢复防护（基准日 {st.entry_row}）"
+        )
+
     def update_signal(self, symbol: str, sig: int) -> None:
         self.manager.guard.update_signal(symbol, sig, self.ledger.day_idx)
 
@@ -359,6 +377,9 @@ class LiveRiskGuard:
         return {
             "prev_close": self.prev_close,
             "stops": stops,
+            # v2.2（R5b）：注册日 + 注册后极值；缺一则同日重启后退化为「当日极值」
+            "reg_day": {k: int(v) for k, v in self.reg_day.items()},
+            "since": {k: [float(v[0]), float(v[1])] for k, v in self.since.items()},
             "guard": {
                 "stopped_today": sorted(g.stopped_today),
                 "dir_lock": dict(g.dir_lock),
@@ -402,6 +423,9 @@ class LiveRiskGuard:
         g = self.manager.guard
         gd = d.get("guard") or {}
         g.stopped_today = set(gd.get("stopped_today") or [])
+        # v2.2（R5b）：兼容 v2.1 状态文件（无该字段 → 空，行为退回旧口径）
+        self.reg_day = {k: int(v) for k, v in (d.get("reg_day") or {}).items()}
+        self.since = {k: [float(v[0]), float(v[1])] for k, v in (d.get("since") or {}).items()}
         g.dir_lock = {k: int(v) for k, v in (gd.get("dir_lock") or {}).items()}
         g.day_lock = {k: int(v) for k, v in (gd.get("day_lock") or {}).items()}
         f = self.manager.fuse

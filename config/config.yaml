@@ -206,3 +206,12 @@ live:                           # v2.0 SimNow 仿真链路（docs/16）
   # 真正的故障处置由「行情停滞 > 10 分钟 → 主动重启」兜底）
   heartbeat_seconds: 120
   reconnect_backoff: [5, 10, 30, 60]
+
+  lifecycle:                    # v2.2 合约生命周期（docs/21）：到期硬闸 + 移仓计划
+    enabled: true
+    path: "config/contracts_lifecycle.yaml"
+    warn_days: 5                # ≤5 自然日：禁新开 + 告警（保守口径，宁可早禁一天）
+    force_close_days: 1         # ≤1 自然日且仍持仓：自动全平（保命优先）
+    roll_trigger_days: 10       # ≤10 天且主力已切换 → 生成移仓计划
+    main_switch_ratio: 1.2      # 候选持仓量 > 当前 ×1.2
+    main_switch_days: 2         # 连续 2 个交易日满足才算切换（防抖）
